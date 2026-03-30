@@ -240,7 +240,7 @@ function parseRemoteHead(value) {
 function ghGraphql(cwd, query, variables) {
 	const args = ["api", "graphql", "-f", `query=${query}`];
 	for (const [key, value] of Object.entries(variables)) {
-		args.push("-F", `${key}=${value}`);
+		args.push(typeof value === "number" ? "-F" : "-f", `${key}=${value}`);
 	}
 	const raw = execFileSync("gh", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 	const parsed = JSON.parse(raw);
