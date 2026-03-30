@@ -1,0 +1,35 @@
+{
+  "name": "pi-agents-alignment",
+  "version": "0.1.0",
+  "description": "pi extension for ambient GitHub Project alignment across coding-agent work",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "github-projects",
+    "coding-agents"
+  ],
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*",
+    "@types/node": "^24.5.2",
+    "typescript": "^5.9.2"
+  }
+}
