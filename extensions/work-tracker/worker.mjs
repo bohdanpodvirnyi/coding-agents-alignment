@@ -243,7 +243,8 @@ function ghGraphql(cwd, query, variables) {
 		args.push("-F", `${key}=${value}`);
 	}
 	const raw = execFileSync("gh", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-	return JSON.parse(raw);
+	const parsed = JSON.parse(raw);
+	return parsed.data ?? parsed;
 }
 
 function extractProject(data) {
