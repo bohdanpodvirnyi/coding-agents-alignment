@@ -78,7 +78,7 @@ function getProjectSnapshot(cwd) {
 		owner: config.githubOwner,
 		number: config.githubProjectNumber,
 	});
-	const project = data.repositoryOwner?.projectV2;
+	const project = extractProject(data);
 	if (!project) {
 		throw new Error(`Project ${config.githubOwner}#${config.githubProjectNumber} not found.`);
 	}
@@ -134,7 +134,7 @@ function getProjectData(cwd, config) {
 		owner: config.githubOwner,
 		number: config.githubProjectNumber,
 	});
-	const project = data.repositoryOwner?.projectV2;
+	const project = extractProject(data);
 	if (!project) throw new Error(`Project ${config.githubOwner}#${config.githubProjectNumber} not found.`);
 	const fieldMap = new Map();
 	const statusOptions = new Map();
@@ -246,6 +246,10 @@ function ghGraphql(cwd, query, variables) {
 	return JSON.parse(raw);
 }
 
+function extractProject(data) {
+	return data.user?.projectV2 ?? data.organization?.projectV2;
+}
+
 function tryRun(cwd, command, args) {
 	try {
 		return execFileSync(command, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
@@ -284,55 +288,53 @@ function formatError(error) {
 
 const PROJECT_QUERY = `
 query($owner: String!, $number: Int!) {
-  repositoryOwner(login: $owner) {
-    ... on User {
-      projectV2(number: $number) {
-        id
-        fields(first: 50) {
-          nodes {
-            ... on ProjectV2FieldCommon {
+  user(login: $owner) {
+    projectV2(number: $number) {
+      id
+      fields(first: 50) {
+        nodes {
+          ... on ProjectV2FieldCommon {
+            id
+            name
+            dataType
+          }
+          ... on ProjectV2SingleSelectField {
+            id
+            name
+            dataType
+            options {
               id
               name
-              dataType
-            }
-            ... on ProjectV2SingleSelectField {
-              id
-              name
-              dataType
-              options {
-                id
-                name
-              }
             }
           }
         }
-        items(first: 100) {
-          nodes {
-            id
-            content {
-              ... on DraftIssue {
-                title
-              }
-              ... on Issue {
-                title
-              }
+      }
+      items(first: 100) {
+        nodes {
+          id
+          content {
+            ... on DraftIssue {
+              title
             }
-            fieldValues(first: 50) {
-              nodes {
-                ... on ProjectV2ItemFieldTextValue {
-                  text
-                  field {
-                    ... on ProjectV2FieldCommon {
-                      name
-                    }
+            ... on Issue {
+              title
+            }
+          }
+          fieldValues(first: 50) {
+            nodes {
+              ... on ProjectV2ItemFieldTextValue {
+                text
+                field {
+                  ... on ProjectV2FieldCommon {
+                    name
                   }
                 }
-                ... on ProjectV2ItemFieldSingleSelectValue {
-                  name
-                  field {
-                    ... on ProjectV2FieldCommon {
-                      name
-                    }
+              }
+              ... on ProjectV2ItemFieldSingleSelectValue {
+                name
+                field {
+                  ... on ProjectV2FieldCommon {
+                    name
                   }
                 }
               }
@@ -341,54 +343,54 @@ query($owner: String!, $number: Int!) {
         }
       }
     }
-    ... on Organization {
-      projectV2(number: $number) {
-        id
-        fields(first: 50) {
-          nodes {
-            ... on ProjectV2FieldCommon {
+  }
+  organization(login: $owner) {
+    projectV2(number: $number) {
+      id
+      fields(first: 50) {
+        nodes {
+          ... on ProjectV2FieldCommon {
+            id
+            name
+            dataType
+          }
+          ... on ProjectV2SingleSelectField {
+            id
+            name
+            dataType
+            options {
               id
               name
-              dataType
-            }
-            ... on ProjectV2SingleSelectField {
-              id
-              name
-              dataType
-              options {
-                id
-                name
-              }
             }
           }
         }
-        items(first: 100) {
-          nodes {
-            id
-            content {
-              ... on DraftIssue {
-                title
-              }
-              ... on Issue {
-                title
-              }
+      }
+      items(first: 100) {
+        nodes {
+          id
+          content {
+            ... on DraftIssue {
+              title
             }
-            fieldValues(first: 50) {
-              nodes {
-                ... on ProjectV2ItemFieldTextValue {
-                  text
-                  field {
-                    ... on ProjectV2FieldCommon {
-                      name
-                    }
+            ... on Issue {
+              title
+            }
+          }
+          fieldValues(first: 50) {
+            nodes {
+              ... on ProjectV2ItemFieldTextValue {
+                text
+                field {
+                  ... on ProjectV2FieldCommon {
+                    name
                   }
                 }
-                ... on ProjectV2ItemFieldSingleSelectValue {
-                  name
-                  field {
-                    ... on ProjectV2FieldCommon {
-                      name
-                    }
+              }
+              ... on ProjectV2ItemFieldSingleSelectValue {
+                name
+                field {
+                  ... on ProjectV2FieldCommon {
+                    name
                   }
                 }
               }
