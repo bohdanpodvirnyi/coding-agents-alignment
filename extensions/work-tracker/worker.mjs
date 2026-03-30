@@ -22,7 +22,7 @@ main();
 async function main() {
 	try {
 		const raw = await readStdin();
-		const payload = JSON.parse(raw || "{}") as Record<string, unknown>;
+		const payload = JSON.parse(raw || "{}");
 		const result = await handle(payload);
 		process.stdout.write(JSON.stringify({ ok: true, result }));
 	} catch (error) {
