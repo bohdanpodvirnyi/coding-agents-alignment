@@ -239,14 +239,22 @@ function ghGraphql(cwd, query, variables) {
 	return parsed.data ?? parsed;
 }
 
+function tryGhGraphql(cwd, query, variables) {
+	try {
+		return ghGraphql(cwd, query, variables);
+	} catch {
+		return {};
+	}
+}
+
 function fetchProject(cwd, config) {
 	const variables = {
 		owner: config.githubOwner,
 		number: config.githubProjectNumber,
 	};
-	const userProject = extractProject(ghGraphql(cwd, USER_PROJECT_QUERY, variables), "user");
+	const userProject = extractProject(tryGhGraphql(cwd, USER_PROJECT_QUERY, variables), "user");
 	if (userProject) return userProject;
-	const orgProject = extractProject(ghGraphql(cwd, ORG_PROJECT_QUERY, variables), "organization");
+	const orgProject = extractProject(tryGhGraphql(cwd, ORG_PROJECT_QUERY, variables), "organization");
 	return orgProject;
 }
 
