@@ -1,6 +1,8 @@
 # pi-agents-alignment
 
-Ambient, zero-input GitHub Project tracking for `pi` sessions.
+Ambient, zero-input GitHub Project tracking for coding agent sessions.
+
+Supports both **pi** and **Claude Code**. See [`claude-code-plugin/`](./claude-code-plugin/) for the Claude Code version.
 
 ## What it does
 
