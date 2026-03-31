@@ -1,9 +1,11 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 
 export type StatusKey = "todo" | "inProgress" | "finished";
+export type TrackerMode = "idle" | "pending" | "tracked" | "unlinked";
 
 export interface TrackerState {
-	mode: "idle" | "tracked" | "skipped";
+	mode: TrackerMode;
+	pendingPrompt?: string;
 	itemId?: string;
 	itemTitle?: string;
 	statusKey?: StatusKey;

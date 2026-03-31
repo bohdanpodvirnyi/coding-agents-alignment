@@ -15,7 +15,6 @@ export interface TrackerConfig {
 		inProgress: string;
 		finished: string;
 	};
-	askKeywords: string[];
 	finishCheckIntervalMs: number;
 }
 
@@ -29,7 +28,6 @@ interface ConfigFileShape {
 	prUrlFieldName?: string;
 	agentFieldName?: string;
 	statuses?: Partial<TrackerConfig["statuses"]>;
-	askKeywords?: string[];
 	finishCheckIntervalMs?: number;
 }
 
@@ -47,7 +45,6 @@ const DEFAULT_CONFIG: Omit<TrackerConfig, "githubOwner" | "githubProjectNumber">
 		inProgress: "In Progress",
 		finished: "Done",
 	},
-	askKeywords: ["implement", "build", "add", "create", "fix", "refactor", "feature"],
 	finishCheckIntervalMs: 60_000,
 };
 
@@ -78,7 +75,6 @@ export function loadTrackerConfig(startDir: string): { config: TrackerConfig; pa
 				fileConfig.statuses?.finished ??
 				DEFAULT_CONFIG.statuses.finished,
 		},
-		askKeywords: fileConfig.askKeywords?.length ? fileConfig.askKeywords : DEFAULT_CONFIG.askKeywords,
 		finishCheckIntervalMs:
 			typeof fileConfig.finishCheckIntervalMs === "number"
 				? fileConfig.finishCheckIntervalMs

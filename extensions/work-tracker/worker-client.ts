@@ -17,6 +17,7 @@ export interface ProjectSnapshot {
 
 export interface GitState {
 	repo: string;
+	repoFullName?: string;
 	branch: string;
 	defaultBranch?: string;
 	headSha?: string;

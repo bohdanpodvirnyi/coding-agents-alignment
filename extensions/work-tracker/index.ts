@@ -1,22 +1,19 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { loadTrackerConfig, statusLabelToKey } from "./config.js";
-import { generateSummary, rankSimilarItems } from "./summary.js";
+import { generateSummary } from "./summary.js";
 import { emptyTrackerState, loadTrackerState, persistTrackerState, type StatusKey, type TrackerState } from "./state.js";
-import { runWorker, type GitState, type ProjectItemSummary, type ProjectSnapshot } from "./worker-client.js";
-
-const PROMPT_OPTIONS = [
-	"Create new tracked item",
-	"Link existing item",
-	"Skip for this session",
-] as const;
+import { runWorker, type GitState, type ProjectSnapshot } from "./worker-client.js";
 
 export default function workTracker(pi: ExtensionAPI) {
 	let state = emptyTrackerState();
-	let enrollmentInFlight = false;
+	let creationInFlight = false;
 	let backgroundQueue = Promise.resolve();
+
+	// ── Helpers ──────────────────────────────────────────────────────────
 
 	const reloadState = (ctx: ExtensionContext) => {
 		state = loadTrackerState(ctx);
+		updateStatusDisplay(ctx);
 	};
 
 	const saveState = (patch: Partial<TrackerState>) => {
@@ -24,142 +21,147 @@ export default function workTracker(pi: ExtensionAPI) {
 		persistTrackerState(pi, state);
 	};
 
-	const resetState = () => {
-		state = emptyTrackerState();
-		persistTrackerState(pi, state);
-	};
-
 	const enqueueBackground = (ctx: ExtensionContext, work: () => Promise<void>) => {
 		backgroundQueue = backgroundQueue
 			.then(work)
-			.catch((error) => ctx.ui.notify(`tracking sync failed: ${messageOf(error)}`, "warning"));
+			.catch((error) => ctx.ui.notify(`tracking: ${messageOf(error)}`, "warning"));
 	};
 
-	const getConfig = (ctx: ExtensionContext, noisy = false) => {
-		const loaded = loadTrackerConfig(ctx.cwd);
-		if (!loaded && noisy) ctx.ui.notify("pi-agents-alignment not configured in this repo", "warning");
-		return loaded?.config;
+	const getConfig = (ctx: ExtensionContext) => {
+		return loadTrackerConfig(ctx.cwd)?.config;
 	};
 
-	const getOpenItems = (config: NonNullable<ReturnType<typeof getConfig>>, snapshot: ProjectSnapshot) =>
-		snapshot.items.filter((item) => {
-			const key = statusLabelToKey(config, item.status);
-			return key === "todo" || key === "inProgress";
-		});
-
-	const selectExistingItem = async (ctx: ExtensionContext, items: ProjectItemSummary[]) => {
-		if (items.length === 0) {
-			ctx.ui.notify("No open tracked items found", "info");
-			return undefined;
+	const updateStatusDisplay = (ctx: ExtensionContext) => {
+		switch (state.mode) {
+			case "pending":
+				ctx.ui.setStatus("tracker", "📋 tracking…");
+				break;
+			case "tracked": {
+				const icon = state.statusKey === "finished" ? "✓" : "●";
+				ctx.ui.setStatus("tracker", `📋 ${icon} ${state.itemTitle ?? "tracked"}`);
+				break;
+			}
+			default:
+				ctx.ui.setStatus("tracker", undefined);
 		}
-		const candidates = items.slice(0, 20);
-		const labels = candidates.map((item) => `${item.title}${item.status ? ` — ${item.status}` : ""}`);
-		const picked = await ctx.ui.select("Link existing tracked item", labels);
-		if (!picked) return undefined;
-		return candidates[labels.indexOf(picked)];
 	};
 
-	const attachTrackedItem = (ctx: ExtensionContext, config: NonNullable<ReturnType<typeof getConfig>>, item: ProjectItemSummary, gitState?: GitState) => {
-		saveState({
-			mode: "tracked",
-			itemId: item.id,
-			itemTitle: item.title,
-			statusKey: statusLabelToKey(config, item.status) ?? "todo",
-			repo: gitState?.repo ?? state.repo,
-			branch: gitState?.branch ?? item.branch ?? state.branch,
-			baseHeadSha: gitState?.headSha ?? state.baseHeadSha,
-			prUrl: gitState?.prUrl ?? item.prUrl,
-			lastSyncAt: Date.now(),
-		});
-		ctx.ui.notify(`tracking: ${item.title}`, "info");
-	};
+	// ── Core: create or link item on first code change ──────────────────
 
-	const promptForTracking = async (ctx: ExtensionContext, prompt: string, force = false) => {
-		if (enrollmentInFlight) return;
-		if (!force && state.mode !== "idle") return;
-		const config = getConfig(ctx, force);
-		if (!config) return;
-		enrollmentInFlight = true;
+	const createOrLinkItem = async (ctx: ExtensionContext) => {
+		const config = getConfig(ctx);
+		if (!config) {
+			creationInFlight = false;
+			return;
+		}
+
 		try {
-			const action = await ctx.ui.select("Track this in GitHub Project?", [...PROMPT_OPTIONS]);
-			if (!action) return;
-			if (action === "Skip for this session") {
-				saveState({ mode: "skipped" });
-				return;
-			}
-			const [snapshot, gitState] = await Promise.all([
-				runWorker<ProjectSnapshot>(ctx.cwd, { command: "projectSnapshot" }),
+			const [gitState, snapshot] = await Promise.all([
 				runWorker<GitState>(ctx.cwd, { command: "gitState" }),
+				runWorker<ProjectSnapshot>(ctx.cwd, { command: "projectSnapshot" }),
 			]);
-			if (action === "Link existing item") {
-				const item = await selectExistingItem(ctx, getOpenItems(config, snapshot));
-				if (!item) return;
-				attachTrackedItem(ctx, config, item, gitState);
-				return;
-			}
-			const generatedTitle = generateSummary(prompt);
-			const editedTitle = (await ctx.ui.editor("Edit tracked item title", generatedTitle))?.trim() || generatedTitle;
-			const similar = rankSimilarItems(editedTitle, getOpenItems(config, snapshot));
-			if (similar.length > 0) {
-				const options = [
-					`Create new: ${editedTitle}`,
-					...similar.map((item) => `Link existing: ${item.title} (${Math.round(item.score * 100)}%)`),
-				];
-				const overlapChoice = await ctx.ui.select("Possible overlap found", options);
-				if (!overlapChoice) return;
-				if (overlapChoice !== options[0]) {
-					const existing = similar[options.indexOf(overlapChoice) - 1];
-					attachTrackedItem(ctx, config, existing, gitState);
-					return;
+
+			// Try branch-based match first
+			const branchMatch = gitState.branch
+				? snapshot.items.find((item) => item.branch === gitState.branch)
+				: undefined;
+
+			if (branchMatch) {
+				const rawKey = statusLabelToKey(config, branchMatch.status) ?? "inProgress";
+				const effectiveKey = rawKey === "todo" ? "inProgress" : rawKey;
+
+				saveState({
+					mode: "tracked",
+					itemId: branchMatch.id,
+					itemTitle: branchMatch.title,
+					statusKey: effectiveKey,
+					repo: gitState.repo,
+					branch: gitState.branch,
+					baseHeadSha: gitState.headSha,
+					prUrl: gitState.prUrl ?? branchMatch.prUrl,
+					lastSyncAt: Date.now(),
+					pendingPrompt: undefined,
+				});
+
+				if (rawKey === "todo") {
+					await runWorker(ctx.cwd, {
+						command: "updateItem",
+						itemId: branchMatch.id,
+						statusKey: "inProgress",
+						repo: gitState.repo,
+						branch: gitState.branch,
+						prUrl: gitState.prUrl ?? branchMatch.prUrl,
+						agent: "pi",
+					});
 				}
+			} else {
+				const title = generateSummary(state.pendingPrompt ?? "Untitled work");
+				const created = await runWorker<{ itemId: string; title: string }>(ctx.cwd, {
+					command: "createItem",
+					title,
+					body: buildDraftBody(state.pendingPrompt ?? "", gitState),
+					repoFullName: gitState.repoFullName,
+					statusKey: "inProgress",
+					repo: gitState.repo,
+					branch: gitState.branch,
+					agent: "pi",
+				});
+
+				saveState({
+					mode: "tracked",
+					itemId: created.itemId,
+					itemTitle: created.title,
+					statusKey: "inProgress",
+					repo: gitState.repo,
+					branch: gitState.branch,
+					baseHeadSha: gitState.headSha,
+					prUrl: gitState.prUrl,
+					lastSyncAt: Date.now(),
+					pendingPrompt: undefined,
+				});
 			}
-			const created = await runWorker<{ itemId: string; title: string }>(ctx.cwd, {
-				command: "createItem",
-				title: editedTitle,
-				body: buildDraftBody(prompt, gitState),
-				statusKey: "todo",
-				repo: gitState.repo,
-				branch: gitState.branch,
-				agent: "pi",
-			});
-			attachTrackedItem(
-				ctx,
-				config,
-				{ id: created.itemId, title: created.title, status: config.statuses.todo, branch: gitState.branch },
-				gitState,
-			);
+
+			updateStatusDisplay(ctx);
 		} catch (error) {
+			saveState({ mode: "idle", pendingPrompt: undefined });
+			updateStatusDisplay(ctx);
 			ctx.ui.notify(`tracking failed: ${messageOf(error)}`, "warning");
 		} finally {
-			enrollmentInFlight = false;
+			creationInFlight = false;
 		}
 	};
 
-	const syncTrackedItem = (ctx: ExtensionContext, nextStatus: StatusKey, extra: Partial<GitState> = {}, notify = true) => {
+	// ── Sync helpers ────────────────────────────────────────────────────
+
+	const syncTrackedItem = (ctx: ExtensionContext, nextStatus: StatusKey, extra: Partial<GitState> = {}) => {
 		if (state.mode !== "tracked" || !state.itemId) return;
 		const config = getConfig(ctx);
 		if (!config) return;
 		const itemId = state.itemId;
-		const nextState: Partial<TrackerState> = {
+
+		saveState({
 			statusKey: nextStatus,
 			branch: extra.branch ?? state.branch,
 			repo: extra.repo ?? state.repo,
 			prUrl: extra.prUrl ?? state.prUrl,
 			lastSyncAt: Date.now(),
-		};
-		saveState(nextState);
+		});
+		updateStatusDisplay(ctx);
+
 		enqueueBackground(ctx, async () => {
-			const latestGitState = extra.branch || extra.repo || extra.prUrl ? undefined : await runWorker<GitState>(ctx.cwd, { command: "gitState" });
+			const latestGit =
+				extra.branch || extra.repo || extra.prUrl
+					? undefined
+					: await runWorker<GitState>(ctx.cwd, { command: "gitState" });
 			await runWorker(ctx.cwd, {
 				command: "updateItem",
 				itemId,
 				statusKey: nextStatus,
-				repo: extra.repo ?? latestGitState?.repo ?? state.repo,
-				branch: extra.branch ?? latestGitState?.branch ?? state.branch,
-				prUrl: extra.prUrl ?? latestGitState?.prUrl ?? state.prUrl,
+				repo: extra.repo ?? latestGit?.repo ?? state.repo,
+				branch: extra.branch ?? latestGit?.branch ?? state.branch,
+				prUrl: extra.prUrl ?? latestGit?.prUrl ?? state.prUrl,
 				agent: "pi",
 			});
-			if (notify) ctx.ui.notify(`tracking synced: ${config.statuses[nextStatus]}`, "info");
 		});
 	};
 
@@ -170,36 +172,51 @@ export default function workTracker(pi: ExtensionAPI) {
 		const now = Date.now();
 		if (state.lastFinishCheckAt && now - state.lastFinishCheckAt < config.finishCheckIntervalMs) return;
 		saveState({ lastFinishCheckAt: now });
+
 		enqueueBackground(ctx, async () => {
 			const gitState = await runWorker<GitState>(ctx.cwd, { command: "gitState" });
-			const committedToDefaultBranch =
+			const committedToDefault =
 				Boolean(gitState.defaultBranch) &&
 				gitState.branch === gitState.defaultBranch &&
 				Boolean(gitState.headSha) &&
 				gitState.headSha !== state.baseHeadSha;
-			if (!gitState.prUrl && !committedToDefaultBranch) return;
+			if (!gitState.prUrl && !committedToDefault) return;
 			syncTrackedItem(ctx, "finished", gitState);
 		});
 	};
+
+	// ── Session lifecycle ───────────────────────────────────────────────
 
 	pi.on("session_start", async (_event, ctx) => reloadState(ctx));
 	pi.on("session_switch", async (_event, ctx) => reloadState(ctx));
 	pi.on("session_fork", async (_event, ctx) => reloadState(ctx));
 	pi.on("session_tree", async (_event, ctx) => reloadState(ctx));
 
+	// ── Automatic tracking ──────────────────────────────────────────────
+
 	pi.on("before_agent_start", async (event, ctx) => {
-		const config = getConfig(ctx);
-		if (!config) return;
-		if (state.mode !== "idle") return;
-		if (!looksLikeDurableWork(event.prompt, config.askKeywords)) return;
-		await promptForTracking(ctx, event.prompt);
+		if (!getConfig(ctx)) return;
+		if (state.mode === "idle") {
+			saveState({ mode: "pending", pendingPrompt: event.prompt });
+			updateStatusDisplay(ctx);
+		} else if (state.mode === "pending") {
+			// Keep the latest prompt for a better title
+			saveState({ pendingPrompt: event.prompt });
+		}
 	});
 
 	pi.on("tool_execution_end", async (event, ctx) => {
-		if ((event.toolName === "edit" || event.toolName === "write") && !event.isError && state.statusKey === "todo") {
-			syncTrackedItem(ctx, "inProgress");
+		if ((event.toolName === "edit" || event.toolName === "write") && !event.isError) {
+			if (state.mode === "pending" && !creationInFlight) {
+				creationInFlight = true;
+				enqueueBackground(ctx, () => createOrLinkItem(ctx));
+			} else if (state.mode === "tracked" && state.statusKey === "todo") {
+				syncTrackedItem(ctx, "inProgress");
+			}
 		}
-		if (event.toolName === "bash" && !event.isError) checkForFinish(ctx);
+		if (event.toolName === "bash" && !event.isError) {
+			checkForFinish(ctx);
+		}
 	});
 
 	pi.on("turn_end", async (_event, ctx) => {
@@ -210,47 +227,62 @@ export default function workTracker(pi: ExtensionAPI) {
 		await backgroundQueue;
 	});
 
+	// ── Commands (manual overrides only) ────────────────────────────────
+
 	pi.registerCommand("track", {
-		description: "Create or link a GitHub Project item for this session",
+		description: "Re-enable automatic tracking after /track-unlink",
 		handler: async (_args, ctx) => {
-			await promptForTracking(ctx, "Manual tracking request", true);
+			if (state.mode === "unlinked") {
+				saveState({ mode: "idle", pendingPrompt: undefined });
+				updateStatusDisplay(ctx);
+				ctx.ui.notify("tracking re-enabled", "info");
+			} else if (state.mode === "tracked") {
+				ctx.ui.notify(`already tracking: ${state.itemTitle}`, "info");
+			} else {
+				ctx.ui.notify(`tracking: ${state.mode}`, "info");
+			}
 		},
 	});
 
 	pi.registerCommand("track-status", {
-		description: "Show current tracked item state",
+		description: "Show current tracking state",
 		handler: async (_args, ctx) => {
-			if (state.mode !== "tracked") {
+			if (state.mode === "tracked") {
+				ctx.ui.notify(
+					`📋 ${state.itemTitle ?? state.itemId} [${state.statusKey}]${state.prUrl ? ` ${state.prUrl}` : ""}`,
+					"info",
+				);
+			} else {
 				ctx.ui.notify(`tracking: ${state.mode}`, "info");
-				return;
 			}
-			ctx.ui.notify(
-				`tracking: ${state.itemTitle ?? state.itemId} [${state.statusKey ?? "unknown"}]${state.prUrl ? ` ${state.prUrl}` : ""}`,
-				"info",
-			);
 		},
 	});
 
 	pi.registerCommand("track-finish", {
-		description: "Force current tracked item to Finished",
+		description: "Force tracked item to Done",
 		handler: async (_args, ctx) => {
+			if (state.mode !== "tracked") {
+				ctx.ui.notify("no tracked item", "warning");
+				return;
+			}
 			syncTrackedItem(ctx, "finished");
 		},
 	});
 
 	pi.registerCommand("track-unlink", {
-		description: "Detach the current session from tracked work",
+		description: "Stop tracking for this session",
 		handler: async (_args, ctx) => {
-			resetState();
-			ctx.ui.notify("tracking unlinked", "info");
+			saveState({ mode: "unlinked", pendingPrompt: undefined });
+			updateStatusDisplay(ctx);
+			ctx.ui.notify("tracking stopped", "info");
 		},
 	});
 
 	pi.registerCommand("track-resync", {
-		description: "Re-run GitHub sync for the tracked item",
+		description: "Re-sync tracked item with GitHub",
 		handler: async (_args, ctx) => {
 			if (state.mode !== "tracked" || !state.itemId) {
-				ctx.ui.notify("no tracked item", "warning");
+				ctx.ui.notify("no tracked item to resync", "warning");
 				return;
 			}
 			enqueueBackground(ctx, async () => {
@@ -258,7 +290,7 @@ export default function workTracker(pi: ExtensionAPI) {
 				await runWorker(ctx.cwd, {
 					command: "updateItem",
 					itemId: state.itemId,
-					statusKey: state.statusKey ?? "todo",
+					statusKey: state.statusKey ?? "inProgress",
 					repo: gitState.repo,
 					branch: gitState.branch,
 					prUrl: gitState.prUrl,
@@ -270,11 +302,7 @@ export default function workTracker(pi: ExtensionAPI) {
 	});
 }
 
-function looksLikeDurableWork(prompt: string, keywords: string[]): boolean {
-	const lower = prompt.toLowerCase();
-	if (lower.length < 20) return false;
-	return keywords.some((keyword) => lower.includes(keyword));
-}
+// ── Utilities ───────────────────────────────────────────────────────────
 
 function buildDraftBody(prompt: string, gitState: GitState): string {
 	const excerpt = prompt.replace(/\s+/g, " ").trim().slice(0, 500);

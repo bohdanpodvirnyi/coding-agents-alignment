@@ -92,12 +92,43 @@ function createItem(cwd, payload) {
 	const title = String(payload.title ?? "").trim();
 	if (!title) throw new Error("createItem requires title");
 	const body = String(payload.body ?? "").trim();
-	const created = ghGraphql(cwd, CREATE_DRAFT_MUTATION, {
-		projectId: snapshot.project.id,
-		title,
-		body,
-	});
-	const itemId = created.addProjectV2DraftIssue?.projectItem?.id;
+	const repoFullName = payload.repoFullName;
+
+	let itemId;
+
+	// Try creating a real issue (supports assignees)
+	if (repoFullName) {
+		try {
+			const currentUser = getCurrentUser(cwd);
+			const issueBody = {
+				title,
+				body,
+				...(currentUser ? { assignees: [currentUser] } : {}),
+			};
+			const issue = ghRest(cwd, "POST", `/repos/${repoFullName}/issues`, issueBody);
+			const contentId = issue.node_id;
+			if (contentId) {
+				const added = ghGraphql(cwd, ADD_ITEM_BY_CONTENT_MUTATION, {
+					projectId: snapshot.project.id,
+					contentId,
+				});
+				itemId = added.addProjectV2ItemById?.item?.id;
+			}
+		} catch {
+			// Fall through to draft creation
+		}
+	}
+
+	// Fallback: create draft (no assignee support)
+	if (!itemId) {
+		const created = ghGraphql(cwd, CREATE_DRAFT_MUTATION, {
+			projectId: snapshot.project.id,
+			title,
+			body,
+		});
+		itemId = created.addProjectV2DraftIssue?.projectItem?.id;
+	}
+
 	if (!itemId) throw new Error("GitHub did not return created project item id.");
 	applyFieldUpdates(cwd, snapshot, itemId, payload);
 	return { itemId, title };
@@ -217,7 +248,9 @@ function getGitState(cwd) {
 	const defaultBranch =
 		parseRemoteHead(tryRun(gitCwd, "git", ["symbolic-ref", "refs/remotes/origin/HEAD"])) ??
 		tryRun(gitCwd, "gh", ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]);
-	const repo = config.repo ?? inferRepoName(gitCwd, root);
+	const repoInfo = inferRepoName(gitCwd, root);
+	const repo = config.repo ?? repoInfo.name;
+	const repoFullName = repoInfo.fullName;
 	const prUrl = branch
 		? tryRun(gitCwd, "gh", [
 				"pr",
@@ -232,14 +265,14 @@ function getGitState(cwd) {
 				".[0].url",
 		  ])
 		: undefined;
-	return { repo, branch, defaultBranch: defaultBranch ?? undefined, headSha: headSha ?? undefined, prUrl: prUrl ?? undefined };
+	return { repo, repoFullName: repoFullName ?? undefined, branch, defaultBranch: defaultBranch ?? undefined, headSha: headSha ?? undefined, prUrl: prUrl ?? undefined };
 }
 
 function inferRepoName(cwd, root) {
 	const remote = tryRun(cwd, "git", ["remote", "get-url", "origin"]);
 	const parsed = remote ? remote.match(/[:/]([^/]+\/[^/.]+)(?:\.git)?$/) : null;
-	if (parsed) return parsed[1].split("/")[1];
-	return path.basename(root);
+	if (parsed) return { name: parsed[1].split("/")[1], fullName: parsed[1] };
+	return { name: path.basename(root), fullName: undefined };
 }
 
 function parseRemoteHead(value) {
@@ -279,6 +312,21 @@ function fetchProject(cwd, config) {
 
 function extractProject(data, key) {
 	return data[key]?.projectV2;
+}
+
+function getCurrentUser(cwd) {
+	return tryRun(cwd, "gh", ["api", "user", "--jq", ".login"]);
+}
+
+function ghRest(cwd, method, endpoint, body) {
+	const args = ["api", endpoint, "--method", method];
+	const options = { cwd, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] };
+	if (body) {
+		args.push("--input", "-");
+		options.input = JSON.stringify(body);
+	}
+	const raw = execFileSync("gh", args, options);
+	return JSON.parse(raw);
 }
 
 function tryRun(cwd, command, args) {
@@ -384,6 +432,15 @@ const ORG_PROJECT_QUERY = `
 query($owner: String!, $number: Int!) {
   organization(login: $owner) {
     ${PROJECT_SELECTION}
+  }
+}`.trim();
+
+const ADD_ITEM_BY_CONTENT_MUTATION = `
+mutation($projectId: ID!, $contentId: ID!) {
+  addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+    item {
+      id
+    }
   }
 }`.trim();
 

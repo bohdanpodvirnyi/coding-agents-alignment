@@ -2,7 +2,6 @@
   "githubOwner": "bohdanpodvirnyi",
   "githubProjectNumber": 1,
   "repo": "hos-agent",
-  "repoPath": "./hos-agent",
   "statusFieldName": "Status",
   "repoFieldName": "Repo",
   "branchFieldName": "Branch",
@@ -13,6 +12,5 @@
     "inProgress": "In Progress",
     "finished": "Done"
   },
-  "askKeywords": ["implement", "build", "add", "create", "fix", "refactor", "feature"],
   "finishCheckIntervalMs": 60000
 }
