@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export interface TrackerConfig {
+export interface AlignmentConfig {
 	githubOwner: string;
 	githubProjectNumber: number;
 	repo?: string;
@@ -27,13 +27,13 @@ interface ConfigFileShape {
 	branchFieldName?: string;
 	prUrlFieldName?: string;
 	agentFieldName?: string;
-	statuses?: Partial<TrackerConfig["statuses"]>;
+	statuses?: Partial<AlignmentConfig["statuses"]>;
 	finishCheckIntervalMs?: number;
 }
 
 const CONFIG_FILE = ".pi-agents-alignment.json";
 
-const DEFAULT_CONFIG: Omit<TrackerConfig, "githubOwner" | "githubProjectNumber"> = {
+const DEFAULT_CONFIG: Omit<AlignmentConfig, "githubOwner" | "githubProjectNumber"> = {
 	repo: undefined,
 	statusFieldName: "Status",
 	repoFieldName: "Repo",
@@ -48,13 +48,13 @@ const DEFAULT_CONFIG: Omit<TrackerConfig, "githubOwner" | "githubProjectNumber">
 	finishCheckIntervalMs: 60_000,
 };
 
-export function loadTrackerConfig(startDir: string): { config: TrackerConfig; path?: string } | null {
+export function loadAlignmentConfig(startDir: string): { config: AlignmentConfig; path?: string } | null {
 	const discovered = findConfigFile(startDir);
 	const fileConfig = discovered ? parseConfigFile(discovered) : {};
 	const githubOwner = process.env.PI_ALIGNMENT_GITHUB_OWNER ?? fileConfig.githubOwner;
 	const githubProjectNumber = Number(process.env.PI_ALIGNMENT_GITHUB_PROJECT_NUMBER ?? fileConfig.githubProjectNumber);
 	if (!githubOwner || !Number.isFinite(githubProjectNumber) || githubProjectNumber <= 0) return null;
-	const config: TrackerConfig = {
+	const config: AlignmentConfig = {
 		githubOwner,
 		githubProjectNumber,
 		repo: process.env.PI_ALIGNMENT_REPO ?? fileConfig.repo ?? DEFAULT_CONFIG.repo,
@@ -83,7 +83,7 @@ export function loadTrackerConfig(startDir: string): { config: TrackerConfig; pa
 	return { config, path: discovered };
 }
 
-export function statusLabelToKey(config: TrackerConfig, label?: string | null): "todo" | "inProgress" | "finished" | undefined {
+export function statusLabelToKey(config: AlignmentConfig, label?: string | null): "todo" | "inProgress" | "finished" | undefined {
 	if (!label) return undefined;
 	if (label === config.statuses.todo) return "todo";
 	if (label === config.statuses.inProgress) return "inProgress";

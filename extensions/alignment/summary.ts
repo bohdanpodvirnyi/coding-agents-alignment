@@ -15,7 +15,7 @@ export function generateSummary(prompt: string): string {
 	let summary = firstSentence;
 	for (const phrase of LEADING_PHRASES) summary = summary.replace(phrase, "");
 	summary = summary.replace(/^to\s+/i, "").trim();
-	if (!summary) summary = "Track new work item";
+	if (!summary) summary = "Untitled work";
 	if (summary.length > 72) summary = `${summary.slice(0, 69).trimEnd()}...`;
 	return capitalize(summary);
 }

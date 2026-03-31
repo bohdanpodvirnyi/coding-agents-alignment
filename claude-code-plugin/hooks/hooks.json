@@ -1,5 +1,5 @@
 {
-  "description": "Ambient GitHub Project tracking — auto-creates/links items on code changes, finishes on PR/merge",
+  "description": "Ambient GitHub Project alignment — auto-creates/links items on code changes, finishes on PR/merge",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/tracker.mjs prompt",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/alignment.mjs prompt",
             "timeout": 5
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/tracker.mjs post-tool",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/alignment.mjs post-tool",
             "timeout": 30
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/tracker.mjs check-finish",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/alignment.mjs check-finish",
             "timeout": 15
           }
         ]
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/tracker.mjs check-finish",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/alignment.mjs check-finish",
             "timeout": 15
           }
         ]

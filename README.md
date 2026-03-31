@@ -1,40 +1,33 @@
 # pi-agents-alignment
 
-Ambient, zero-input GitHub Project tracking for coding agent sessions.
+Ambient GitHub Project alignment for coding agents. Zero input required — work is automatically aligned as issues in a GitHub Project.
 
-Supports both **pi** and **Claude Code**. See [`claude-code-plugin/`](./claude-code-plugin/) for the Claude Code version.
+Works with **[pi](https://github.com/badlogic/pi-mono)** and **Claude Code**.
 
-## What it does
+## How it works
 
-Automatically tracks coding work in a GitHub Project — no prompts, no enrollment dialogs, no interruptions.
-
-**How it works:**
-
-1. You start a `pi` session and give it a task
-2. The extension silently captures the prompt
-3. On the first `edit` or `write`, it auto-creates a GitHub Project draft item (or links an existing one by branch name) and sets status to **In Progress**
+1. Agent session starts, user gives a task
+2. The extension captures the prompt silently
+3. On the first `edit` or `write`, it auto-creates a GitHub issue (with the current user as assignee) and adds it to the project as **In Progress** — or links an existing item by branch name
 4. When a PR is detected or work lands on the default branch → **Done**
-5. A small footer indicator shows tracking state — that's it
 
-**Design principles:**
-- **Zero user input** — never prompts, asks, or blocks
-- **Fail silently** — GitHub API issues log a warning, coding continues
-- **Smart defaults** — auto-detects repo, branch, generates title from prompt
-- **Branch matching** — if a Project item already references the current branch, it links instead of creating a duplicate
+No prompts. No dialogs. No interruptions.
 
 ## Install
 
-### From git
+### pi
 
 ```bash
 pi install git:github.com/bohdanpodvirnyi/pi-agents-alignment
 ```
 
-### Local dev
+### Claude Code
 
 ```bash
-pi install /absolute/path/to/pi-agents-alignment
+ln -s /path/to/pi-agents-alignment/claude-code-plugin ~/.claude/plugins/pi-agents-alignment
 ```
+
+See [`claude-code-plugin/README.md`](./claude-code-plugin/README.md) for Claude Code–specific details.
 
 ## Configure
 
@@ -42,74 +35,82 @@ Create `.pi-agents-alignment.json` in your repo root:
 
 ```json
 {
-  "githubOwner": "bohdanpodvirnyi",
+  "githubOwner": "your-org",
   "githubProjectNumber": 1,
-  "repo": "hos-agent"
+  "repo": "your-repo"
 }
 ```
 
-Optional keys:
-- `statusFieldName` (default `"Status"`)
-- `repoFieldName` (default `"Repo"`)
-- `branchFieldName` (default `"Branch"`)
-- `prUrlFieldName` (default `"PR URL"`)
-- `agentFieldName` (default `"Agent"`)
-- `statuses.todo` (default `"Todo"`)
-- `statuses.inProgress` (default `"In Progress"`)
-- `statuses.finished` (default `"Done"`)
-- `finishCheckIntervalMs` (default `60000`)
+### All options
 
-Env var overrides: `PI_ALIGNMENT_GITHUB_OWNER`, `PI_ALIGNMENT_GITHUB_PROJECT_NUMBER`, `PI_ALIGNMENT_REPO`, etc.
+| Key | Default | Description |
+|-----|---------|-------------|
+| `githubOwner` | — | GitHub user or org that owns the project |
+| `githubProjectNumber` | — | Project number (visible in project URL) |
+| `repo` | inferred from git | Display name for the repo field |
+| `repoPath` | — | Relative path to the git repo (for multi-repo workspaces) |
+| `statusFieldName` | `"Status"` | Name of the single-select status field |
+| `repoFieldName` | `"Repo"` | Name of the repo text field |
+| `branchFieldName` | `"Branch"` | Name of the branch text field |
+| `prUrlFieldName` | `"PR URL"` | Name of the PR URL text field |
+| `agentFieldName` | `"Agent"` | Name of the agent text field |
+| `statuses.todo` | `"Todo"` | Label for the todo status |
+| `statuses.inProgress` | `"In Progress"` | Label for the in-progress status |
+| `statuses.finished` | `"Done"` | Label for the finished status |
+| `finishCheckIntervalMs` | `60000` | Throttle for finish detection checks |
 
-## GitHub Project requirements
+Every key can be overridden with env vars: `PI_ALIGNMENT_GITHUB_OWNER`, `PI_ALIGNMENT_GITHUB_PROJECT_NUMBER`, `PI_ALIGNMENT_REPO`, `PI_ALIGNMENT_REPO_PATH`, etc.
 
-Expected fields:
-- `Status` — single select with `Todo`, `In Progress`, `Done`
-- `Repo` — text
-- `Branch` — text
-- `PR URL` — text
-- `Agent` — text
+## GitHub Project setup
+
+Your project needs these fields:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `Status` | Single select | `Todo` → `In Progress` → `Done` |
+| `Repo` | Text | Which repo the work is in |
+| `Branch` | Text | Git branch name |
+| `PR URL` | Text | Pull request URL |
+| `Agent` | Text | Which agent did the work |
+
+Items are created as real GitHub issues (with assignee), not drafts. Falls back to drafts if issue creation fails.
 
 ## State machine
 
 ```
-idle → pending (prompt captured) → tracked (item created/linked)
+idle → pending (prompt captured) → aligned (issue created/linked)
                                        ↓
                               inProgress → finished
 ```
 
-- **idle** — no config found, or session just started
-- **pending** — prompt captured, waiting for first code change
-- **tracked** — GitHub Project item created or linked
-- **unlinked** — user explicitly stopped tracking via `/track-unlink`
-
-## Footer indicator
-
-- `📋 tracking…` — prompt captured, waiting for edits
-- `📋 ● Title` — actively tracking (In Progress)
-- `📋 ✓ Title` — work finished (Done)
-
 ## Commands
+
+### pi
 
 | Command | Description |
 |---------|-------------|
-| `/track` | Re-enable tracking after `/track-unlink` |
-| `/track-status` | Show current tracking state |
-| `/track-finish` | Force tracked item to Done |
-| `/track-unlink` | Stop tracking for this session |
-| `/track-resync` | Re-sync tracked item with GitHub |
+| `/align` | Re-enable alignment after `/align-unlink` |
+| `/align-status` | Show current alignment state |
+| `/align-finish` | Force aligned item to Done |
+| `/align-unlink` | Stop alignment for this session |
+| `/align-resync` | Re-sync aligned item with GitHub |
 
-## Dev
+### Claude Code
+
+Same commands, same names.
+
+## Requirements
+
+- `gh` CLI authenticated (`gh auth login`)
+- Node.js ≥ 18
+
+## Development
 
 ```bash
 npm install
-npm run check
+npm run check   # TypeScript type-check
 ```
 
-## Notes
+## License
 
-- Uses local `gh` auth; no GitHub App required
-- GitHub sync runs in a background worker process
-- Failures are non-fatal; coding is never blocked
-- Read-only sessions (no edits) don't create project items
-- Items are created as draft issues in the GitHub Project
+MIT

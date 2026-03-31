@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * pi-agents-alignment tracker for Claude Code.
+ * pi-agents-alignment — Claude Code hook handler.
  *
- * Single entry point called by all hooks:
- *   node tracker.mjs prompt        — UserPromptSubmit
- *   node tracker.mjs post-tool     — PostToolUse (Edit/Write)
- *   node tracker.mjs check-finish  — PostToolUse (Bash) + Stop
- *   node tracker.mjs cmd <action>  — Slash-command handler
+ * Entry points:
+ *   node alignment.mjs prompt        — UserPromptSubmit
+ *   node alignment.mjs post-tool     — PostToolUse (Edit/Write)
+ *   node alignment.mjs check-finish  — PostToolUse (Bash) + Stop
+ *   node alignment.mjs cmd <action>  — Slash-command handler
  */
 
 import fs from "node:fs";
@@ -18,8 +18,6 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKER_PATH = path.join(__dirname, "worker.mjs");
 const STATE_DIR = path.join(process.env.HOME ?? "/tmp", ".cache", "pi-agents-alignment");
-
-// ── Main (at bottom so all constants/functions are initialized) ──────
 
 // ── Action handlers ─────────────────────────────────────────────────────
 
@@ -45,8 +43,8 @@ async function handlePostTool(_input, sessionId, cwd) {
 
 	if (state.mode === "pending") {
 		await createOrLinkItem(sessionId, cwd, config, state);
-	} else if (state.mode === "tracked" && state.statusKey === "todo") {
-		syncTrackedItem(sessionId, cwd, config, state, "inProgress");
+	} else if (state.mode === "aligned" && state.statusKey === "todo") {
+		syncItem(sessionId, cwd, config, state, "inProgress");
 	}
 }
 
@@ -63,44 +61,44 @@ async function handleCommand(command, sessionId, cwd) {
 
 	switch (command) {
 		case "status": {
-			if (state.mode === "tracked") {
+			if (state.mode === "aligned") {
 				const pr = state.prUrl ? ` ${state.prUrl}` : "";
 				console.log(`📋 ${state.itemTitle ?? state.itemId} [${state.statusKey}]${pr}`);
 			} else {
-				console.log(`tracking: ${state.mode}`);
+				console.log(`alignment: ${state.mode}`);
 			}
 			break;
 		}
 		case "finish": {
-			if (state.mode !== "tracked") {
-				console.log("no tracked item");
+			if (state.mode !== "aligned") {
+				console.log("no aligned item");
 				return;
 			}
 			const config = loadConfig(cwd);
 			if (!config) return;
-			syncTrackedItem(sessionId, cwd, config, state, "finished");
+			syncItem(sessionId, cwd, config, state, "finished");
 			console.log("✓ marked as done");
 			break;
 		}
 		case "unlink": {
 			writeState(sessionId, { mode: "unlinked" });
-			console.log("tracking stopped");
+			console.log("alignment stopped");
 			break;
 		}
-		case "track": {
+		case "align": {
 			if (state.mode === "unlinked") {
 				writeState(sessionId, { mode: "idle" });
-				console.log("tracking re-enabled");
-			} else if (state.mode === "tracked") {
-				console.log(`already tracking: ${state.itemTitle}`);
+				console.log("alignment re-enabled");
+			} else if (state.mode === "aligned") {
+				console.log(`already aligned: ${state.itemTitle}`);
 			} else {
-				console.log(`tracking: ${state.mode}`);
+				console.log(`alignment: ${state.mode}`);
 			}
 			break;
 		}
 		case "resync": {
-			if (state.mode !== "tracked" || !state.itemId) {
-				console.log("no tracked item to resync");
+			if (state.mode !== "aligned" || !state.itemId) {
+				console.log("no aligned item to resync");
 				return;
 			}
 			const config = loadConfig(cwd);
@@ -115,7 +113,7 @@ async function handleCommand(command, sessionId, cwd) {
 				prUrl: gitState.prUrl,
 				agent: "claude-code",
 			});
-			console.log("✓ resynced");
+			console.log("✓ synced");
 			break;
 		}
 		default:
@@ -123,7 +121,7 @@ async function handleCommand(command, sessionId, cwd) {
 	}
 }
 
-// ── Core tracking logic ─────────────────────────────────────────────────
+// ── Core alignment logic ────────────────────────────────────────────────
 
 async function createOrLinkItem(sessionId, cwd, config, state) {
 	let gitState, snapshot;
@@ -133,7 +131,6 @@ async function createOrLinkItem(sessionId, cwd, config, state) {
 			Promise.resolve(runWorker(cwd, { command: "projectSnapshot" })),
 		]);
 	} catch {
-		// No git repo or project not found — revert to idle
 		writeState(sessionId, { mode: "idle" });
 		return;
 	}
@@ -148,7 +145,7 @@ async function createOrLinkItem(sessionId, cwd, config, state) {
 		const effectiveKey = rawKey === "todo" ? "inProgress" : rawKey;
 
 		writeState(sessionId, {
-			mode: "tracked",
+			mode: "aligned",
 			itemId: branchMatch.id,
 			itemTitle: branchMatch.title,
 			statusKey: effectiveKey,
@@ -193,7 +190,7 @@ async function createOrLinkItem(sessionId, cwd, config, state) {
 		}
 
 		writeState(sessionId, {
-			mode: "tracked",
+			mode: "aligned",
 			itemId: created.itemId,
 			itemTitle: created.title,
 			statusKey: "inProgress",
@@ -207,8 +204,8 @@ async function createOrLinkItem(sessionId, cwd, config, state) {
 	}
 }
 
-function syncTrackedItem(sessionId, cwd, config, state, nextStatus, extra = {}) {
-	if (state.mode !== "tracked" || !state.itemId) return;
+function syncItem(sessionId, cwd, config, state, nextStatus, extra = {}) {
+	if (state.mode !== "aligned" || !state.itemId) return;
 
 	const updated = {
 		...state,
@@ -232,7 +229,7 @@ function syncTrackedItem(sessionId, cwd, config, state, nextStatus, extra = {}) 
 }
 
 function checkForFinish(sessionId, cwd, config, state) {
-	if (state.mode !== "tracked" || state.statusKey === "finished" || !state.itemId) return;
+	if (state.mode !== "aligned" || state.statusKey === "finished" || !state.itemId) return;
 
 	const now = Date.now();
 	if (state.lastFinishCheckAt && now - state.lastFinishCheckAt < config.finishCheckIntervalMs) return;
@@ -254,7 +251,7 @@ function checkForFinish(sessionId, cwd, config, state) {
 
 	if (!gitState.prUrl && !committedToDefault) return;
 
-	syncTrackedItem(sessionId, cwd, config, state, "finished", gitState);
+	syncItem(sessionId, cwd, config, state, "finished", gitState);
 }
 
 // ── State management ────────────────────────────────────────────────────
@@ -352,7 +349,7 @@ function generateSummary(prompt) {
 	let summary = firstSentence;
 	for (const re of LEADING_PHRASES) summary = summary.replace(re, "");
 	summary = summary.replace(/^to\s+/i, "").trim();
-	if (!summary) summary = "Track new work item";
+	if (!summary) summary = "Untitled work";
 	if (summary.length > 72) summary = `${summary.slice(0, 69).trimEnd()}...`;
 	return summary.charAt(0).toUpperCase() + summary.slice(1);
 }
@@ -385,7 +382,7 @@ function tryWorker(cwd, payload) {
 function buildDraftBody(prompt, gitState) {
 	const excerpt = prompt.replace(/\s+/g, " ").trim().slice(0, 500);
 	return [
-		"Created by pi-agents-alignment (Claude Code)",
+		"Created by pi-agents-alignment",
 		`Created at: ${new Date().toISOString()}`,
 		`Repo: ${gitState.repo}`,
 		`Branch: ${gitState.branch}`,
@@ -411,14 +408,12 @@ const action = process.argv[2];
 
 try {
 	if (action === "cmd") {
-		// Commands pass session ID and cwd as args (no stdin)
 		const command = process.argv[3];
 		const sessionId = process.argv[4];
 		const cwd = process.argv[5] || process.cwd();
 		if (!sessionId) process.exit(0);
 		await handleCommand(command, sessionId, cwd);
 	} else {
-		// Hooks receive JSON on stdin
 		const input = JSON.parse(await readStdin());
 		const sessionId = input.session_id;
 		const cwd = input.cwd ?? process.cwd();
@@ -439,9 +434,8 @@ try {
 		}
 	}
 } catch (error) {
-	// Never block the agent — swallow errors silently
 	const msg = error instanceof Error ? error.message : String(error);
-	process.stderr.write(`[tracker] ${msg}\n`);
+	process.stderr.write(`[alignment] ${msg}\n`);
 }
 
 process.exit(0);

@@ -1,10 +1,10 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 
 export type StatusKey = "todo" | "inProgress" | "finished";
-export type TrackerMode = "idle" | "pending" | "tracked" | "unlinked";
+export type AlignmentMode = "idle" | "pending" | "aligned" | "unlinked";
 
-export interface TrackerState {
-	mode: TrackerMode;
+export interface AlignmentState {
+	mode: AlignmentMode;
 	pendingPrompt?: string;
 	itemId?: string;
 	itemTitle?: string;
@@ -19,19 +19,19 @@ export interface TrackerState {
 
 const CUSTOM_TYPE = "pi-agents-alignment-state";
 
-export function emptyTrackerState(): TrackerState {
+export function emptyState(): AlignmentState {
 	return { mode: "idle" };
 }
 
-export function loadTrackerState(ctx: ExtensionContext): TrackerState {
-	let current = emptyTrackerState();
+export function loadState(ctx: ExtensionContext): AlignmentState {
+	let current = emptyState();
 	for (const entry of ctx.sessionManager.getBranch()) {
 		if (entry.type !== "custom" || entry.customType !== CUSTOM_TYPE) continue;
-		current = { ...current, ...(entry.data as Partial<TrackerState>) };
+		current = { ...current, ...(entry.data as Partial<AlignmentState>) };
 	}
 	return current;
 }
 
-export function persistTrackerState(pi: { appendEntry: (customType: string, data?: unknown) => void }, state: TrackerState) {
+export function persistState(pi: { appendEntry: (customType: string, data?: unknown) => void }, state: AlignmentState) {
 	pi.appendEntry(CUSTOM_TYPE, state);
 }

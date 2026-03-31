@@ -1,16 +1,5 @@
 {
-  "githubOwner": "bohdanpodvirnyi",
+  "githubOwner": "your-org",
   "githubProjectNumber": 1,
-  "repo": "hos-agent",
-  "statusFieldName": "Status",
-  "repoFieldName": "Repo",
-  "branchFieldName": "Branch",
-  "prUrlFieldName": "PR URL",
-  "agentFieldName": "Agent",
-  "statuses": {
-    "todo": "Todo",
-    "inProgress": "In Progress",
-    "finished": "Done"
-  },
-  "finishCheckIntervalMs": 60000
+  "repo": "your-repo"
 }

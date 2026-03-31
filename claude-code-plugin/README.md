@@ -1,10 +1,10 @@
 # pi-agents-alignment — Claude Code Plugin
 
-Ambient, zero-input GitHub Project tracking for Claude Code sessions.
+Ambient, zero-input GitHub Project alignment for Claude Code sessions.
 
 ## What it does
 
-Automatically tracks coding work in a GitHub Project — no prompts, no dialogs, no interruptions.
+Automatically aligns coding work with a GitHub Project — no prompts, no dialogs, no interruptions.
 
 1. You start a Claude Code session and give it a task
 2. The plugin captures the prompt via `UserPromptSubmit` hook
@@ -13,23 +13,11 @@ Automatically tracks coding work in a GitHub Project — no prompts, no dialogs,
 
 ## Install
 
-### As a plugin (recommended)
-
 Symlink or copy the plugin directory:
 
 ```bash
-# Symlink
 ln -s /path/to/pi-agents-alignment/claude-code-plugin ~/.claude/plugins/pi-agents-alignment
-
-# Or copy
-cp -r /path/to/pi-agents-alignment/claude-code-plugin ~/.claude/plugins/pi-agents-alignment
 ```
-
-Then enable it in Claude Code settings or restart.
-
-### Manual hooks
-
-Add the hooks from `hooks/hooks.json` to your `.claude/settings.json` under the `hooks` key, replacing `${CLAUDE_PLUGIN_ROOT}` with the absolute path to this directory.
 
 ## Configure
 
@@ -43,13 +31,13 @@ Create `.pi-agents-alignment.json` in your repo root:
 }
 ```
 
-Same config format as the pi version. See the [main README](../README.md) for all options.
+Same config format as the pi version — see the [main README](../README.md) for all options.
 
 ## Requirements
 
 - `gh` CLI authenticated (`gh auth login`)
-- Node.js (for tracker scripts)
-- GitHub Project with `Status` field (Todo / In Progress / Done)
+- Node.js ≥ 18
+- GitHub Project with a `Status` single-select field (`Todo` / `In Progress` / `Done`)
 
 ## Hooks
 
@@ -64,20 +52,19 @@ Same config format as the pi version. See the [main README](../README.md) for al
 
 | Command | Description |
 |---------|-------------|
-| `/track` | Re-enable tracking after `/track-unlink` |
-| `/track-status` | Show current tracking state |
-| `/track-finish` | Force tracked item to Done |
-| `/track-unlink` | Stop tracking for this session |
-| `/track-resync` | Re-sync tracked item with GitHub |
+| `/align` | Re-enable alignment after `/align-unlink` |
+| `/align-status` | Show current alignment state |
+| `/align-finish` | Force aligned item to Done |
+| `/align-unlink` | Stop alignment for this session |
+| `/align-resync` | Re-sync aligned item with GitHub |
 
 ## State
 
-Per-session state is stored in `~/.cache/pi-agents-alignment/<session-id>.json`.
+Per-session state stored in `~/.cache/pi-agents-alignment/<session-id>.json`.
 
 ## Notes
 
-- Creates real GitHub issues (not drafts) — supports assignees
-- Current `gh` user is auto-assigned to created issues
+- Creates real GitHub issues (not drafts) with current user as assignee
 - Falls back to draft items if issue creation fails
 - Failures are non-fatal — coding is never blocked
 - Read-only sessions (no edits) don't create project items

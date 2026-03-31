@@ -1,48 +1,48 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { loadTrackerConfig, statusLabelToKey } from "./config.js";
+import { loadAlignmentConfig, statusLabelToKey } from "./config.js";
 import { generateSummary } from "./summary.js";
-import { emptyTrackerState, loadTrackerState, persistTrackerState, type StatusKey, type TrackerState } from "./state.js";
+import { emptyState, loadState, persistState, type StatusKey, type AlignmentState } from "./state.js";
 import { runWorker, type GitState, type ProjectSnapshot } from "./worker-client.js";
 
-export default function workTracker(pi: ExtensionAPI) {
-	let state = emptyTrackerState();
+export default function alignment(pi: ExtensionAPI) {
+	let state = emptyState();
 	let creationInFlight = false;
 	let backgroundQueue = Promise.resolve();
 
 	// ── Helpers ──────────────────────────────────────────────────────────
 
 	const reloadState = (ctx: ExtensionContext) => {
-		state = loadTrackerState(ctx);
-		updateStatusDisplay(ctx);
+		state = loadState(ctx);
+		updateStatus(ctx);
 	};
 
-	const saveState = (patch: Partial<TrackerState>) => {
+	const saveState = (patch: Partial<AlignmentState>) => {
 		state = { ...state, ...patch };
-		persistTrackerState(pi, state);
+		persistState(pi, state);
 	};
 
 	const enqueueBackground = (ctx: ExtensionContext, work: () => Promise<void>) => {
 		backgroundQueue = backgroundQueue
 			.then(work)
-			.catch((error) => ctx.ui.notify(`tracking: ${messageOf(error)}`, "warning"));
+			.catch((error) => ctx.ui.notify(`alignment: ${messageOf(error)}`, "warning"));
 	};
 
 	const getConfig = (ctx: ExtensionContext) => {
-		return loadTrackerConfig(ctx.cwd)?.config;
+		return loadAlignmentConfig(ctx.cwd)?.config;
 	};
 
-	const updateStatusDisplay = (ctx: ExtensionContext) => {
+	const updateStatus = (ctx: ExtensionContext) => {
 		switch (state.mode) {
 			case "pending":
-				ctx.ui.setStatus("tracker", "📋 tracking…");
+				ctx.ui.setStatus("alignment", "📋 aligning…");
 				break;
-			case "tracked": {
+			case "aligned": {
 				const icon = state.statusKey === "finished" ? "✓" : "●";
-				ctx.ui.setStatus("tracker", `📋 ${icon} ${state.itemTitle ?? "tracked"}`);
+				ctx.ui.setStatus("alignment", `📋 ${icon} ${state.itemTitle ?? "aligned"}`);
 				break;
 			}
 			default:
-				ctx.ui.setStatus("tracker", undefined);
+				ctx.ui.setStatus("alignment", undefined);
 		}
 	};
 
@@ -71,7 +71,7 @@ export default function workTracker(pi: ExtensionAPI) {
 				const effectiveKey = rawKey === "todo" ? "inProgress" : rawKey;
 
 				saveState({
-					mode: "tracked",
+					mode: "aligned",
 					itemId: branchMatch.id,
 					itemTitle: branchMatch.title,
 					statusKey: effectiveKey,
@@ -108,7 +108,7 @@ export default function workTracker(pi: ExtensionAPI) {
 				});
 
 				saveState({
-					mode: "tracked",
+					mode: "aligned",
 					itemId: created.itemId,
 					itemTitle: created.title,
 					statusKey: "inProgress",
@@ -121,11 +121,11 @@ export default function workTracker(pi: ExtensionAPI) {
 				});
 			}
 
-			updateStatusDisplay(ctx);
+			updateStatus(ctx);
 		} catch (error) {
 			saveState({ mode: "idle", pendingPrompt: undefined });
-			updateStatusDisplay(ctx);
-			ctx.ui.notify(`tracking failed: ${messageOf(error)}`, "warning");
+			updateStatus(ctx);
+			ctx.ui.notify(`alignment failed: ${messageOf(error)}`, "warning");
 		} finally {
 			creationInFlight = false;
 		}
@@ -133,8 +133,8 @@ export default function workTracker(pi: ExtensionAPI) {
 
 	// ── Sync helpers ────────────────────────────────────────────────────
 
-	const syncTrackedItem = (ctx: ExtensionContext, nextStatus: StatusKey, extra: Partial<GitState> = {}) => {
-		if (state.mode !== "tracked" || !state.itemId) return;
+	const syncItem = (ctx: ExtensionContext, nextStatus: StatusKey, extra: Partial<GitState> = {}) => {
+		if (state.mode !== "aligned" || !state.itemId) return;
 		const config = getConfig(ctx);
 		if (!config) return;
 		const itemId = state.itemId;
@@ -146,7 +146,7 @@ export default function workTracker(pi: ExtensionAPI) {
 			prUrl: extra.prUrl ?? state.prUrl,
 			lastSyncAt: Date.now(),
 		});
-		updateStatusDisplay(ctx);
+		updateStatus(ctx);
 
 		enqueueBackground(ctx, async () => {
 			const latestGit =
@@ -166,7 +166,7 @@ export default function workTracker(pi: ExtensionAPI) {
 	};
 
 	const checkForFinish = (ctx: ExtensionContext) => {
-		if (state.mode !== "tracked" || state.statusKey === "finished" || !state.itemId) return;
+		if (state.mode !== "aligned" || state.statusKey === "finished" || !state.itemId) return;
 		const config = getConfig(ctx);
 		if (!config) return;
 		const now = Date.now();
@@ -181,7 +181,7 @@ export default function workTracker(pi: ExtensionAPI) {
 				Boolean(gitState.headSha) &&
 				gitState.headSha !== state.baseHeadSha;
 			if (!gitState.prUrl && !committedToDefault) return;
-			syncTrackedItem(ctx, "finished", gitState);
+			syncItem(ctx, "finished", gitState);
 		});
 	};
 
@@ -192,15 +192,14 @@ export default function workTracker(pi: ExtensionAPI) {
 	pi.on("session_fork", async (_event, ctx) => reloadState(ctx));
 	pi.on("session_tree", async (_event, ctx) => reloadState(ctx));
 
-	// ── Automatic tracking ──────────────────────────────────────────────
+	// ── Automatic alignment ─────────────────────────────────────────────
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (!getConfig(ctx)) return;
 		if (state.mode === "idle") {
 			saveState({ mode: "pending", pendingPrompt: event.prompt });
-			updateStatusDisplay(ctx);
+			updateStatus(ctx);
 		} else if (state.mode === "pending") {
-			// Keep the latest prompt for a better title
 			saveState({ pendingPrompt: event.prompt });
 		}
 	});
@@ -210,8 +209,8 @@ export default function workTracker(pi: ExtensionAPI) {
 			if (state.mode === "pending" && !creationInFlight) {
 				creationInFlight = true;
 				enqueueBackground(ctx, () => createOrLinkItem(ctx));
-			} else if (state.mode === "tracked" && state.statusKey === "todo") {
-				syncTrackedItem(ctx, "inProgress");
+			} else if (state.mode === "aligned" && state.statusKey === "todo") {
+				syncItem(ctx, "inProgress");
 			}
 		}
 		if (event.toolName === "bash" && !event.isError) {
@@ -227,62 +226,62 @@ export default function workTracker(pi: ExtensionAPI) {
 		await backgroundQueue;
 	});
 
-	// ── Commands (manual overrides only) ────────────────────────────────
+	// ── Commands ────────────────────────────────────────────────────────
 
-	pi.registerCommand("track", {
-		description: "Re-enable automatic tracking after /track-unlink",
+	pi.registerCommand("align", {
+		description: "Re-enable alignment after /align-unlink",
 		handler: async (_args, ctx) => {
 			if (state.mode === "unlinked") {
 				saveState({ mode: "idle", pendingPrompt: undefined });
-				updateStatusDisplay(ctx);
-				ctx.ui.notify("tracking re-enabled", "info");
-			} else if (state.mode === "tracked") {
-				ctx.ui.notify(`already tracking: ${state.itemTitle}`, "info");
+				updateStatus(ctx);
+				ctx.ui.notify("alignment re-enabled", "info");
+			} else if (state.mode === "aligned") {
+				ctx.ui.notify(`already aligned: ${state.itemTitle}`, "info");
 			} else {
-				ctx.ui.notify(`tracking: ${state.mode}`, "info");
+				ctx.ui.notify(`alignment: ${state.mode}`, "info");
 			}
 		},
 	});
 
-	pi.registerCommand("track-status", {
-		description: "Show current tracking state",
+	pi.registerCommand("align-status", {
+		description: "Show current alignment state",
 		handler: async (_args, ctx) => {
-			if (state.mode === "tracked") {
+			if (state.mode === "aligned") {
 				ctx.ui.notify(
 					`📋 ${state.itemTitle ?? state.itemId} [${state.statusKey}]${state.prUrl ? ` ${state.prUrl}` : ""}`,
 					"info",
 				);
 			} else {
-				ctx.ui.notify(`tracking: ${state.mode}`, "info");
+				ctx.ui.notify(`alignment: ${state.mode}`, "info");
 			}
 		},
 	});
 
-	pi.registerCommand("track-finish", {
-		description: "Force tracked item to Done",
+	pi.registerCommand("align-finish", {
+		description: "Force aligned item to Done",
 		handler: async (_args, ctx) => {
-			if (state.mode !== "tracked") {
-				ctx.ui.notify("no tracked item", "warning");
+			if (state.mode !== "aligned") {
+				ctx.ui.notify("no aligned item", "warning");
 				return;
 			}
-			syncTrackedItem(ctx, "finished");
+			syncItem(ctx, "finished");
 		},
 	});
 
-	pi.registerCommand("track-unlink", {
-		description: "Stop tracking for this session",
+	pi.registerCommand("align-unlink", {
+		description: "Stop alignment for this session",
 		handler: async (_args, ctx) => {
 			saveState({ mode: "unlinked", pendingPrompt: undefined });
-			updateStatusDisplay(ctx);
-			ctx.ui.notify("tracking stopped", "info");
+			updateStatus(ctx);
+			ctx.ui.notify("alignment stopped", "info");
 		},
 	});
 
-	pi.registerCommand("track-resync", {
-		description: "Re-sync tracked item with GitHub",
+	pi.registerCommand("align-resync", {
+		description: "Re-sync aligned item with GitHub",
 		handler: async (_args, ctx) => {
-			if (state.mode !== "tracked" || !state.itemId) {
-				ctx.ui.notify("no tracked item to resync", "warning");
+			if (state.mode !== "aligned" || !state.itemId) {
+				ctx.ui.notify("no aligned item to resync", "warning");
 				return;
 			}
 			enqueueBackground(ctx, async () => {
@@ -296,7 +295,7 @@ export default function workTracker(pi: ExtensionAPI) {
 					prUrl: gitState.prUrl,
 					agent: "pi",
 				});
-				ctx.ui.notify("tracking resynced", "info");
+				ctx.ui.notify("alignment synced", "info");
 			});
 		},
 	});
