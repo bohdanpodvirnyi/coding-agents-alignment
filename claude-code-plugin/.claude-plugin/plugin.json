@@ -1,5 +1,5 @@
 {
   "name": "pi-agents-alignment",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Ambient, zero-input GitHub Project alignment for Claude Code sessions. Auto-creates issues with assignee on first code change, syncs status through Done on PR/merge."
 }

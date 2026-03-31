@@ -1,6 +1,6 @@
 {
   "name": "pi-agents-alignment",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Ambient GitHub Project alignment for coding agents (pi + Claude Code)",
   "type": "module",
   "keywords": [
