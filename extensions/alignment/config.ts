@@ -31,7 +31,7 @@ interface ConfigFileShape {
 	finishCheckIntervalMs?: number;
 }
 
-const CONFIG_FILE = ".pi-agents-alignment.json";
+const CONFIG_FILE = ".coding-agents-alignment.json";
 
 const DEFAULT_CONFIG: Omit<AlignmentConfig, "githubOwner" | "githubProjectNumber"> = {
 	repo: undefined,
@@ -51,27 +51,34 @@ const DEFAULT_CONFIG: Omit<AlignmentConfig, "githubOwner" | "githubProjectNumber
 export function loadAlignmentConfig(startDir: string): { config: AlignmentConfig; path?: string } | null {
 	const discovered = findConfigFile(startDir);
 	const fileConfig = discovered ? parseConfigFile(discovered) : {};
-	const githubOwner = process.env.PI_ALIGNMENT_GITHUB_OWNER ?? fileConfig.githubOwner;
-	const githubProjectNumber = Number(process.env.PI_ALIGNMENT_GITHUB_PROJECT_NUMBER ?? fileConfig.githubProjectNumber);
+	const githubOwner = process.env.CODING_AGENTS_ALIGNMENT_GITHUB_OWNER ?? fileConfig.githubOwner;
+	const githubProjectNumber = Number(
+		process.env.CODING_AGENTS_ALIGNMENT_GITHUB_PROJECT_NUMBER ?? fileConfig.githubProjectNumber,
+	);
 	if (!githubOwner || !Number.isFinite(githubProjectNumber) || githubProjectNumber <= 0) return null;
 	const config: AlignmentConfig = {
 		githubOwner,
 		githubProjectNumber,
-		repo: process.env.PI_ALIGNMENT_REPO ?? fileConfig.repo ?? DEFAULT_CONFIG.repo,
-		statusFieldName: process.env.PI_ALIGNMENT_STATUS_FIELD ?? fileConfig.statusFieldName ?? DEFAULT_CONFIG.statusFieldName,
-		repoFieldName: process.env.PI_ALIGNMENT_REPO_FIELD ?? fileConfig.repoFieldName ?? DEFAULT_CONFIG.repoFieldName,
+		repo: process.env.CODING_AGENTS_ALIGNMENT_REPO ?? fileConfig.repo ?? DEFAULT_CONFIG.repo,
+		statusFieldName:
+			process.env.CODING_AGENTS_ALIGNMENT_STATUS_FIELD ?? fileConfig.statusFieldName ?? DEFAULT_CONFIG.statusFieldName,
+		repoFieldName:
+			process.env.CODING_AGENTS_ALIGNMENT_REPO_FIELD ?? fileConfig.repoFieldName ?? DEFAULT_CONFIG.repoFieldName,
 		branchFieldName:
-			process.env.PI_ALIGNMENT_BRANCH_FIELD ?? fileConfig.branchFieldName ?? DEFAULT_CONFIG.branchFieldName,
-		prUrlFieldName: process.env.PI_ALIGNMENT_PR_URL_FIELD ?? fileConfig.prUrlFieldName ?? DEFAULT_CONFIG.prUrlFieldName,
-		agentFieldName: process.env.PI_ALIGNMENT_AGENT_FIELD ?? fileConfig.agentFieldName ?? DEFAULT_CONFIG.agentFieldName,
+			process.env.CODING_AGENTS_ALIGNMENT_BRANCH_FIELD ?? fileConfig.branchFieldName ?? DEFAULT_CONFIG.branchFieldName,
+		prUrlFieldName:
+			process.env.CODING_AGENTS_ALIGNMENT_PR_URL_FIELD ?? fileConfig.prUrlFieldName ?? DEFAULT_CONFIG.prUrlFieldName,
+		agentFieldName:
+			process.env.CODING_AGENTS_ALIGNMENT_AGENT_FIELD ?? fileConfig.agentFieldName ?? DEFAULT_CONFIG.agentFieldName,
 		statuses: {
-			todo: process.env.PI_ALIGNMENT_STATUS_TODO ?? fileConfig.statuses?.todo ?? DEFAULT_CONFIG.statuses.todo,
+			todo:
+				process.env.CODING_AGENTS_ALIGNMENT_STATUS_TODO ?? fileConfig.statuses?.todo ?? DEFAULT_CONFIG.statuses.todo,
 			inProgress:
-				process.env.PI_ALIGNMENT_STATUS_IN_PROGRESS ??
+				process.env.CODING_AGENTS_ALIGNMENT_STATUS_IN_PROGRESS ??
 				fileConfig.statuses?.inProgress ??
 				DEFAULT_CONFIG.statuses.inProgress,
 			finished:
-				process.env.PI_ALIGNMENT_STATUS_FINISHED ??
+				process.env.CODING_AGENTS_ALIGNMENT_STATUS_FINISHED ??
 				fileConfig.statuses?.finished ??
 				DEFAULT_CONFIG.statuses.finished,
 		},
@@ -83,7 +90,10 @@ export function loadAlignmentConfig(startDir: string): { config: AlignmentConfig
 	return { config, path: discovered };
 }
 
-export function statusLabelToKey(config: AlignmentConfig, label?: string | null): "todo" | "inProgress" | "finished" | undefined {
+export function statusLabelToKey(
+	config: AlignmentConfig,
+	label?: string | null,
+): "todo" | "inProgress" | "finished" | undefined {
 	if (!label) return undefined;
 	if (label === config.statuses.todo) return "todo";
 	if (label === config.statuses.inProgress) return "inProgress";
@@ -104,6 +114,5 @@ function findConfigFile(startDir: string): string | undefined {
 
 function parseConfigFile(filePath: string): ConfigFileShape {
 	const raw = fs.readFileSync(filePath, "utf8");
-	const parsed = JSON.parse(raw) as ConfigFileShape;
-	return parsed;
+	return JSON.parse(raw) as ConfigFileShape;
 }

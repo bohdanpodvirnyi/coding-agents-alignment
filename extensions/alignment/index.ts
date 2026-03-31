@@ -306,7 +306,7 @@ export default function alignment(pi: ExtensionAPI) {
 function buildDraftBody(prompt: string, gitState: GitState): string {
 	const excerpt = prompt.replace(/\s+/g, " ").trim().slice(0, 500);
 	return [
-		"Created by pi-agents-alignment",
+		"Created by coding-agents-alignment",
 		`Created at: ${new Date().toISOString()}`,
 		`Repo: ${gitState.repo}`,
 		`Branch: ${gitState.branch}`,

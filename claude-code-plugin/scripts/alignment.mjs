@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * pi-agents-alignment — Claude Code hook handler.
+ * coding-agents-alignment — Claude Code hook handler.
  *
  * Entry points:
  *   node alignment.mjs prompt        — UserPromptSubmit
@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKER_PATH = path.join(__dirname, "worker.mjs");
-const STATE_DIR = path.join(process.env.HOME ?? "/tmp", ".cache", "pi-agents-alignment");
+const STATE_DIR = path.join(process.env.HOME ?? "/tmp", ".cache", "coding-agents-alignment");
 
 // ── Action handlers ─────────────────────────────────────────────────────
 
@@ -279,7 +279,7 @@ function statePath(sessionId) {
 
 // ── Config ──────────────────────────────────────────────────────────────
 
-const CONFIG_FILE = ".pi-agents-alignment.json";
+const CONFIG_FILE = ".coding-agents-alignment.json";
 
 const DEFAULTS = {
 	statusFieldName: "Status",
@@ -295,19 +295,19 @@ function loadConfig(startDir) {
 	const filePath = findConfigFile(startDir);
 	const fc = filePath ? JSON.parse(fs.readFileSync(filePath, "utf8")) : {};
 
-	const githubOwner = process.env.PI_ALIGNMENT_GITHUB_OWNER ?? fc.githubOwner;
-	const githubProjectNumber = Number(process.env.PI_ALIGNMENT_GITHUB_PROJECT_NUMBER ?? fc.githubProjectNumber);
+	const githubOwner = process.env.CODING_AGENTS_ALIGNMENT_GITHUB_OWNER ?? fc.githubOwner;
+	const githubProjectNumber = Number(process.env.CODING_AGENTS_ALIGNMENT_GITHUB_PROJECT_NUMBER ?? fc.githubProjectNumber);
 	if (!githubOwner || !Number.isFinite(githubProjectNumber) || githubProjectNumber <= 0) return null;
 
 	return {
 		githubOwner,
 		githubProjectNumber,
-		repo: process.env.PI_ALIGNMENT_REPO ?? fc.repo,
-		statusFieldName: process.env.PI_ALIGNMENT_STATUS_FIELD ?? fc.statusFieldName ?? DEFAULTS.statusFieldName,
+		repo: process.env.CODING_AGENTS_ALIGNMENT_REPO ?? fc.repo,
+		statusFieldName: process.env.CODING_AGENTS_ALIGNMENT_STATUS_FIELD ?? fc.statusFieldName ?? DEFAULTS.statusFieldName,
 		statuses: {
-			todo: process.env.PI_ALIGNMENT_STATUS_TODO ?? fc.statuses?.todo ?? DEFAULTS.statuses.todo,
-			inProgress: process.env.PI_ALIGNMENT_STATUS_IN_PROGRESS ?? fc.statuses?.inProgress ?? DEFAULTS.statuses.inProgress,
-			finished: process.env.PI_ALIGNMENT_STATUS_FINISHED ?? fc.statuses?.finished ?? DEFAULTS.statuses.finished,
+			todo: process.env.CODING_AGENTS_ALIGNMENT_STATUS_TODO ?? fc.statuses?.todo ?? DEFAULTS.statuses.todo,
+			inProgress: process.env.CODING_AGENTS_ALIGNMENT_STATUS_IN_PROGRESS ?? fc.statuses?.inProgress ?? DEFAULTS.statuses.inProgress,
+			finished: process.env.CODING_AGENTS_ALIGNMENT_STATUS_FINISHED ?? fc.statuses?.finished ?? DEFAULTS.statuses.finished,
 		},
 		finishCheckIntervalMs: typeof fc.finishCheckIntervalMs === "number" ? fc.finishCheckIntervalMs : DEFAULTS.finishCheckIntervalMs,
 	};
@@ -382,7 +382,7 @@ function tryWorker(cwd, payload) {
 function buildDraftBody(prompt, gitState) {
 	const excerpt = prompt.replace(/\s+/g, " ").trim().slice(0, 500);
 	return [
-		"Created by pi-agents-alignment",
+		"Created by coding-agents-alignment",
 		`Created at: ${new Date().toISOString()}`,
 		`Repo: ${gitState.repo}`,
 		`Branch: ${gitState.branch}`,

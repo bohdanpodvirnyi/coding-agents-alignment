@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-const CONFIG_FILE = ".pi-agents-alignment.json";
+const CONFIG_FILE = ".coding-agents-alignment.json";
 
 const DEFAULTS = {
 	statusFieldName: "Status",
@@ -49,26 +49,26 @@ async function handle(payload) {
 function loadConfig(cwd) {
 	const filePath = findConfigFile(cwd);
 	const fileConfig = filePath ? JSON.parse(fs.readFileSync(filePath, "utf8")) : {};
-	const githubOwner = process.env.PI_ALIGNMENT_GITHUB_OWNER ?? fileConfig.githubOwner;
-	const githubProjectNumber = Number(process.env.PI_ALIGNMENT_GITHUB_PROJECT_NUMBER ?? fileConfig.githubProjectNumber);
+	const githubOwner = process.env.CODING_AGENTS_ALIGNMENT_GITHUB_OWNER ?? fileConfig.githubOwner;
+	const githubProjectNumber = Number(process.env.CODING_AGENTS_ALIGNMENT_GITHUB_PROJECT_NUMBER ?? fileConfig.githubProjectNumber);
 	if (!githubOwner || !Number.isFinite(githubProjectNumber) || githubProjectNumber <= 0) {
-		throw new Error(`Missing GitHub Project config. Set ${CONFIG_FILE} or PI_ALIGNMENT_GITHUB_* env vars.`);
+		throw new Error(`Missing GitHub Project config. Set ${CONFIG_FILE} or CODING_AGENTS_ALIGNMENT_GITHUB_* env vars.`);
 	}
 	return {
 		githubOwner,
 		githubProjectNumber,
-		repo: process.env.PI_ALIGNMENT_REPO ?? fileConfig.repo,
-		repoPath: process.env.PI_ALIGNMENT_REPO_PATH ?? fileConfig.repoPath,
-		statusFieldName: process.env.PI_ALIGNMENT_STATUS_FIELD ?? fileConfig.statusFieldName ?? DEFAULTS.statusFieldName,
-		repoFieldName: process.env.PI_ALIGNMENT_REPO_FIELD ?? fileConfig.repoFieldName ?? DEFAULTS.repoFieldName,
-		branchFieldName: process.env.PI_ALIGNMENT_BRANCH_FIELD ?? fileConfig.branchFieldName ?? DEFAULTS.branchFieldName,
-		prUrlFieldName: process.env.PI_ALIGNMENT_PR_URL_FIELD ?? fileConfig.prUrlFieldName ?? DEFAULTS.prUrlFieldName,
-		agentFieldName: process.env.PI_ALIGNMENT_AGENT_FIELD ?? fileConfig.agentFieldName ?? DEFAULTS.agentFieldName,
+		repo: process.env.CODING_AGENTS_ALIGNMENT_REPO ?? fileConfig.repo,
+		repoPath: process.env.CODING_AGENTS_ALIGNMENT_REPO_PATH ?? fileConfig.repoPath,
+		statusFieldName: process.env.CODING_AGENTS_ALIGNMENT_STATUS_FIELD ?? fileConfig.statusFieldName ?? DEFAULTS.statusFieldName,
+		repoFieldName: process.env.CODING_AGENTS_ALIGNMENT_REPO_FIELD ?? fileConfig.repoFieldName ?? DEFAULTS.repoFieldName,
+		branchFieldName: process.env.CODING_AGENTS_ALIGNMENT_BRANCH_FIELD ?? fileConfig.branchFieldName ?? DEFAULTS.branchFieldName,
+		prUrlFieldName: process.env.CODING_AGENTS_ALIGNMENT_PR_URL_FIELD ?? fileConfig.prUrlFieldName ?? DEFAULTS.prUrlFieldName,
+		agentFieldName: process.env.CODING_AGENTS_ALIGNMENT_AGENT_FIELD ?? fileConfig.agentFieldName ?? DEFAULTS.agentFieldName,
 		statuses: {
-			todo: process.env.PI_ALIGNMENT_STATUS_TODO ?? fileConfig.statuses?.todo ?? DEFAULTS.statuses.todo,
+			todo: process.env.CODING_AGENTS_ALIGNMENT_STATUS_TODO ?? fileConfig.statuses?.todo ?? DEFAULTS.statuses.todo,
 			inProgress:
-				process.env.PI_ALIGNMENT_STATUS_IN_PROGRESS ?? fileConfig.statuses?.inProgress ?? DEFAULTS.statuses.inProgress,
-			finished: process.env.PI_ALIGNMENT_STATUS_FINISHED ?? fileConfig.statuses?.finished ?? DEFAULTS.statuses.finished,
+				process.env.CODING_AGENTS_ALIGNMENT_STATUS_IN_PROGRESS ?? fileConfig.statuses?.inProgress ?? DEFAULTS.statuses.inProgress,
+			finished: process.env.CODING_AGENTS_ALIGNMENT_STATUS_FINISHED ?? fileConfig.statuses?.finished ?? DEFAULTS.statuses.finished,
 		},
 	};
 }

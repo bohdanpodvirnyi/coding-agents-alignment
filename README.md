@@ -1,4 +1,4 @@
-# pi-agents-alignment
+# coding-agents-alignment
 
 Ambient GitHub Project alignment for coding agents. Zero input required — work is automatically aligned as issues in a GitHub Project.
 
@@ -18,20 +18,20 @@ No prompts. No dialogs. No interruptions.
 ### pi
 
 ```bash
-pi install git:github.com/bohdanpodvirnyi/pi-agents-alignment
+pi install git:github.com/bohdanpodvirnyi/coding-agents-alignment
 ```
 
 ### Claude Code
 
 ```bash
-ln -s /path/to/pi-agents-alignment/claude-code-plugin ~/.claude/plugins/pi-agents-alignment
+ln -s /path/to/coding-agents-alignment/claude-code-plugin ~/.claude/plugins/coding-agents-alignment
 ```
 
 See [`claude-code-plugin/README.md`](./claude-code-plugin/README.md) for Claude Code–specific details.
 
 ## Configure
 
-Create `.pi-agents-alignment.json` in your repo root:
+Create `.coding-agents-alignment.json` in your repo root:
 
 ```json
 {
@@ -59,7 +59,7 @@ Create `.pi-agents-alignment.json` in your repo root:
 | `statuses.finished` | `"Done"` | Label for the finished status |
 | `finishCheckIntervalMs` | `60000` | Throttle for finish detection checks |
 
-Every key can be overridden with env vars: `PI_ALIGNMENT_GITHUB_OWNER`, `PI_ALIGNMENT_GITHUB_PROJECT_NUMBER`, `PI_ALIGNMENT_REPO`, `PI_ALIGNMENT_REPO_PATH`, etc.
+Every key can be overridden with env vars: `CODING_AGENTS_ALIGNMENT_GITHUB_OWNER`, `CODING_AGENTS_ALIGNMENT_GITHUB_PROJECT_NUMBER`, `CODING_AGENTS_ALIGNMENT_REPO`, `CODING_AGENTS_ALIGNMENT_REPO_PATH`, etc.
 
 ## GitHub Project setup
 
@@ -77,7 +77,7 @@ Items are created as real GitHub issues (with assignee), not drafts. Falls back 
 
 ## State machine
 
-```
+```text
 idle → pending (prompt captured) → aligned (issue created/linked)
                                        ↓
                               inProgress → finished
@@ -108,7 +108,7 @@ Same commands, same names.
 
 ```bash
 npm install
-npm run check   # TypeScript type-check
+npm run check
 ```
 
 ## License

@@ -17,7 +17,7 @@ export interface AlignmentState {
 	lastFinishCheckAt?: number;
 }
 
-const CUSTOM_TYPE = "pi-agents-alignment-state";
+const CUSTOM_TYPE = "coding-agents-alignment-state";
 
 export function emptyState(): AlignmentState {
 	return { mode: "idle" };

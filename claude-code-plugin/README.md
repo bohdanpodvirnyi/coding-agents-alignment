@@ -1,4 +1,4 @@
-# pi-agents-alignment — Claude Code Plugin
+# coding-agents-alignment — Claude Code Plugin
 
 Ambient, zero-input GitHub Project alignment for Claude Code sessions.
 
@@ -13,15 +13,13 @@ Automatically aligns coding work with a GitHub Project — no prompts, no dialog
 
 ## Install
 
-Symlink or copy the plugin directory:
-
 ```bash
-ln -s /path/to/pi-agents-alignment/claude-code-plugin ~/.claude/plugins/pi-agents-alignment
+ln -s /path/to/coding-agents-alignment/claude-code-plugin ~/.claude/plugins/coding-agents-alignment
 ```
 
 ## Configure
 
-Create `.pi-agents-alignment.json` in your repo root:
+Create `.coding-agents-alignment.json` in your repo root:
 
 ```json
 {
@@ -31,7 +29,7 @@ Create `.pi-agents-alignment.json` in your repo root:
 }
 ```
 
-Same config format as the pi version — see the [main README](../README.md) for all options.
+Same config format as the pi package — see the [main README](../README.md) for all options.
 
 ## Requirements
 
@@ -60,7 +58,7 @@ Same config format as the pi version — see the [main README](../README.md) for
 
 ## State
 
-Per-session state stored in `~/.cache/pi-agents-alignment/<session-id>.json`.
+Per-session state stored in `~/.cache/coding-agents-alignment/<session-id>.json`.
 
 ## Notes
 
