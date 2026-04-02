@@ -89,15 +89,37 @@ idle → pending (prompt captured) → aligned (issue created/linked)
 
 | Command | Description |
 |---------|-------------|
-| `/align` | Re-enable alignment after `/align-unlink` |
+| `/align` | Re-enable alignment, or start tracking current work immediately |
 | `/align-status` | Show current alignment state |
 | `/align-finish` | Force aligned item to Done |
 | `/align-unlink` | Stop alignment for this session |
 | `/align-resync` | Re-sync aligned item with GitHub |
 
+Examples:
+
+```text
+/align
+```
+
+Start tracking immediately, even before the first edit/write.
+
+```text
+/align fix extension loading conflict
+```
+
+In pi, optional text seeds the issue title/summary when you want to start tracking manually.
+
 ### Claude Code
 
 Same commands, same names.
+
+Example:
+
+```text
+/align
+```
+
+Useful when you want to create/link the project item right away instead of waiting for the first edit/write.
 
 ## Requirements
 

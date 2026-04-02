@@ -50,11 +50,19 @@ Same config format as the pi package — see the [main README](../README.md) for
 
 | Command | Description |
 |---------|-------------|
-| `/align` | Re-enable alignment after `/align-unlink` |
+| `/align` | Re-enable alignment, or start tracking current work immediately |
 | `/align-status` | Show current alignment state |
 | `/align-finish` | Force aligned item to Done |
 | `/align-unlink` | Stop alignment for this session |
 | `/align-resync` | Re-sync aligned item with GitHub |
+
+Example:
+
+```text
+/align
+```
+
+Use this when you want to start tracking manually before the first edit/write.
 
 ## State
 

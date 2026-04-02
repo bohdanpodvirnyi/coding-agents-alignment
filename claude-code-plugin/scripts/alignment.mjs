@@ -86,13 +86,25 @@ async function handleCommand(command, sessionId, cwd) {
 			break;
 		}
 		case "align": {
-			if (state.mode === "unlinked") {
-				writeState(sessionId, { mode: "idle" });
-				console.log("alignment re-enabled");
-			} else if (state.mode === "aligned") {
+			if (state.mode === "aligned") {
 				console.log(`already aligned: ${state.itemTitle}`);
+				break;
+			}
+			const config = loadConfig(cwd);
+			if (!config) {
+				console.log("alignment not configured");
+				break;
+			}
+			const pendingPrompt = state.pendingPrompt?.trim() || "Track current work manually";
+			writeState(sessionId, { ...state, mode: "pending", pendingPrompt });
+			await createOrLinkItem(sessionId, cwd, config, { ...state, mode: "pending", pendingPrompt });
+			const nextState = readState(sessionId);
+			if (nextState.mode === "aligned") {
+				console.log(`alignment started: ${nextState.itemTitle}`);
+			} else if (nextState.mode === "pending") {
+				console.log("alignment pending");
 			} else {
-				console.log(`alignment: ${state.mode}`);
+				console.log("alignment start failed");
 			}
 			break;
 		}

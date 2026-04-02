@@ -347,17 +347,28 @@ export default function alignment(pi: ExtensionAPI) {
 	// ── Commands ────────────────────────────────────────────────────────
 
 	pi.registerCommand("align", {
-		description: "Re-enable alignment after /align-unlink",
-		handler: async (_args, ctx) => {
-			if (state.mode === "unlinked") {
-				saveState({ mode: "idle", pendingPrompt: undefined });
-				updateStatus(ctx);
-				ctx.ui.notify("alignment re-enabled", "info");
-			} else if (state.mode === "aligned") {
+		description: "Re-enable alignment, or start tracking current work now",
+		handler: async (args, ctx) => {
+			if (state.mode === "aligned") {
 				ctx.ui.notify(`already aligned: ${state.itemTitle}`, "info");
-			} else {
-				ctx.ui.notify(`alignment: ${state.mode}`, "info");
+				return;
 			}
+			if (!getConfig(ctx)) {
+				ctx.ui.notify("alignment not configured", "warning");
+				return;
+			}
+			if (creationInFlight) {
+				ctx.ui.notify("alignment already starting", "info");
+				return;
+			}
+
+			const previousMode = state.mode;
+			const pendingPrompt = args.trim() || state.pendingPrompt || "Track current work manually";
+			saveState({ mode: "pending", pendingPrompt });
+			updateStatus(ctx);
+			creationInFlight = true;
+			enqueueBackground(ctx, () => createOrLinkItem(ctx));
+			ctx.ui.notify(previousMode === "unlinked" ? "alignment re-enabled; starting tracking" : "alignment starting", "info");
 		},
 	});
 
