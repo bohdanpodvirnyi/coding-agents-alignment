@@ -1,5 +1,5 @@
 {
   "name": "coding-agents-alignment",
-  "version": "1.0.1",
-  "description": "Ambient, zero-input GitHub Project alignment for Claude Code sessions. Auto-creates issues with assignee on first code change, syncs status through Done on PR/merge."
+  "version": "0.1.0",
+  "description": "Ambient GitHub Project alignment for Claude Code sessions. Creates issues during planning, promotes on code changes, and finishes on merge."
 }

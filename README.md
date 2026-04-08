@@ -18,11 +18,28 @@ No prompts. No dialogs. No interruptions.
 
 ### pi
 
+From npm:
+
+```bash
+pi install coding-agents-alignment
+```
+
+From Git:
+
 ```bash
 pi install git:github.com/bohdanpodvirnyi/coding-agents-alignment
 ```
 
 ### Claude Code
+
+From npm:
+
+```bash
+npm install -g coding-agents-alignment
+ln -s "$(npm root -g)/coding-agents-alignment/claude-code-plugin" ~/.claude/plugins/coding-agents-alignment
+```
+
+From a local checkout:
 
 ```bash
 ln -s /path/to/coding-agents-alignment/claude-code-plugin ~/.claude/plugins/coding-agents-alignment

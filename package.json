@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "Ambient GitHub Project alignment for coding agents (pi + Claude Code)",
   "type": "module",
+  "main": "./dist/extensions/alignment/index.js",
+  "files": [
+    "dist/",
+    "claude-code-plugin/",
+    "README.md",
+    "LICENSE",
+    ".coding-agents-alignment.example.json"
+  ],
   "keywords": [
     "pi-package",
     "pi",
@@ -10,14 +18,19 @@
     "coding-agents"
   ],
   "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
   "pi": {
     "extensions": [
-      "./extensions"
+      "./dist/extensions"
     ]
   },
   "scripts": {
+    "build": "node ./scripts/build.mjs",
     "check": "tsc --noEmit",
-    "test": "node --test --test-concurrency=1 tests/*.test.mjs"
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "prepack": "npm run build"
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",

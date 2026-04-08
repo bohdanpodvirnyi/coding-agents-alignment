@@ -14,6 +14,15 @@ Automatically aligns coding work with a GitHub Project — no prompts, no dialog
 
 ## Install
 
+From npm:
+
+```bash
+npm install -g coding-agents-alignment
+ln -s "$(npm root -g)/coding-agents-alignment/claude-code-plugin" ~/.claude/plugins/coding-agents-alignment
+```
+
+From a local checkout:
+
 ```bash
 ln -s /path/to/coding-agents-alignment/claude-code-plugin ~/.claude/plugins/coding-agents-alignment
 ```
