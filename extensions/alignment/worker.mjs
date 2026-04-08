@@ -10,8 +10,12 @@ const DEFAULTS = {
 	branchFieldName: "Branch",
 	prUrlFieldName: "PR URL",
 	agentFieldName: "Agent",
+	visibility: "silent",
+	attachPlanningArtifacts: true,
+	artifactMaxFiles: 20,
+	artifactInlineMaxBytes: 32_768,
 	statuses: {
-		todo: "Todo",
+		planning: "Planning",
 		inProgress: "In Progress",
 		finished: "Done",
 	},
@@ -43,6 +47,10 @@ async function handle(payload) {
 			return updateItem(process.cwd(), payload);
 		case "gitState":
 			return getGitState(process.cwd());
+		case "planningArtifacts":
+			return getPlanningArtifacts(process.cwd());
+		case "commentIssue":
+			return commentIssue(process.cwd(), payload);
 		default:
 			throw new Error(`Unknown worker command: ${String(payload.command)}`);
 	}
@@ -66,11 +74,30 @@ function loadConfig(cwd) {
 		branchFieldName: process.env.CODING_AGENTS_ALIGNMENT_BRANCH_FIELD ?? fileConfig.branchFieldName ?? DEFAULTS.branchFieldName,
 		prUrlFieldName: process.env.CODING_AGENTS_ALIGNMENT_PR_URL_FIELD ?? fileConfig.prUrlFieldName ?? DEFAULTS.prUrlFieldName,
 		agentFieldName: process.env.CODING_AGENTS_ALIGNMENT_AGENT_FIELD ?? fileConfig.agentFieldName ?? DEFAULTS.agentFieldName,
+		visibility: process.env.CODING_AGENTS_ALIGNMENT_VISIBILITY ?? fileConfig.visibility ?? DEFAULTS.visibility,
+		attachPlanningArtifacts:
+			parseBoolean(process.env.CODING_AGENTS_ALIGNMENT_ATTACH_PLANNING_ARTIFACTS) ??
+			fileConfig.attachPlanningArtifacts ??
+			DEFAULTS.attachPlanningArtifacts,
+		artifactMaxFiles:
+			parseNumber(process.env.CODING_AGENTS_ALIGNMENT_ARTIFACT_MAX_FILES) ??
+			fileConfig.artifactMaxFiles ??
+			DEFAULTS.artifactMaxFiles,
+		artifactInlineMaxBytes:
+			parseNumber(process.env.CODING_AGENTS_ALIGNMENT_ARTIFACT_INLINE_MAX_BYTES) ??
+			fileConfig.artifactInlineMaxBytes ??
+			DEFAULTS.artifactInlineMaxBytes,
 		statuses: {
-			todo: process.env.CODING_AGENTS_ALIGNMENT_STATUS_TODO ?? fileConfig.statuses?.todo ?? DEFAULTS.statuses.todo,
+			planning:
+				process.env.CODING_AGENTS_ALIGNMENT_STATUS_PLANNING ??
+				process.env.CODING_AGENTS_ALIGNMENT_STATUS_TODO ??
+				fileConfig.statuses?.planning ??
+				fileConfig.statuses?.todo ??
+				DEFAULTS.statuses.planning,
 			inProgress:
 				process.env.CODING_AGENTS_ALIGNMENT_STATUS_IN_PROGRESS ?? fileConfig.statuses?.inProgress ?? DEFAULTS.statuses.inProgress,
-			finished: process.env.CODING_AGENTS_ALIGNMENT_STATUS_FINISHED ?? fileConfig.statuses?.finished ?? DEFAULTS.statuses.finished,
+			finished:
+				process.env.CODING_AGENTS_ALIGNMENT_STATUS_FINISHED ?? fileConfig.statuses?.finished ?? DEFAULTS.statuses.finished,
 		},
 	};
 }
@@ -101,7 +128,6 @@ function createItem(cwd, payload) {
 	let contentId;
 	let contentUrl;
 
-	// Try creating a real issue (supports assignees)
 	if (repoFullName) {
 		try {
 			const currentUser = getCurrentUser(cwd);
@@ -121,11 +147,10 @@ function createItem(cwd, payload) {
 				itemId = added.addProjectV2ItemById?.item?.id;
 			}
 		} catch {
-			// Fall through to draft creation
+			// Fall through to draft creation.
 		}
 	}
 
-	// Fallback: create draft (no assignee support)
 	if (!itemId) {
 		const created = ghGraphql(cwd, CREATE_DRAFT_MUTATION, {
 			projectId: snapshot.project.id,
@@ -160,6 +185,59 @@ function updateItem(cwd, payload) {
 	if (!itemId) throw new Error("updateItem requires itemId");
 	applyFieldUpdates(cwd, snapshot, itemId, payload);
 	return { itemId };
+}
+
+function commentIssue(cwd, payload) {
+	const issueUrl = String(payload.issueUrl ?? "").trim();
+	const body = String(payload.body ?? "").trim();
+	if (!issueUrl) throw new Error("commentIssue requires issueUrl");
+	if (!body) throw new Error("commentIssue requires body");
+	const parsed = parseIssueUrl(issueUrl);
+	if (!parsed) throw new Error(`Unsupported issue URL: ${issueUrl}`);
+	return ghRest(cwd, "POST", `/repos/${parsed.repoFullName}/issues/${parsed.issueNumber}/comments`, { body });
+}
+
+function getPlanningArtifacts(cwd) {
+	const config = loadConfig(cwd);
+	const gitCwd = resolveGitCwd(cwd, config);
+	const status = tryRun(gitCwd, "git", ["status", "--porcelain", "--untracked-files=all"]) ?? "";
+	const files = [];
+	let remainingBytes = Math.max(0, config.artifactInlineMaxBytes);
+
+	for (const line of status.split(/\r?\n/)) {
+		if (!line.trim()) continue;
+		const record = parseStatusLine(line);
+		if (!record) continue;
+		if (!/\.md$/i.test(record.path)) continue;
+		if (record.status.includes("D")) continue;
+		if (files.length >= config.artifactMaxFiles) break;
+
+		const artifact = {
+			path: record.path,
+			status: record.status,
+		};
+		const absolutePath = path.join(gitCwd, record.path);
+		if (remainingBytes > 0 && fs.existsSync(absolutePath)) {
+			const content = fs.readFileSync(absolutePath, "utf8");
+			if (Buffer.byteLength(content, "utf8") <= remainingBytes) {
+				artifact.content = content;
+				remainingBytes -= Buffer.byteLength(content, "utf8");
+			} else {
+				const clipped = clipUtf8(content, remainingBytes);
+				if (clipped) {
+					artifact.content = clipped;
+					remainingBytes -= Buffer.byteLength(clipped, "utf8");
+				}
+				artifact.contentTruncated = true;
+			}
+		}
+		files.push(artifact);
+	}
+
+	return {
+		root: gitCwd,
+		files,
+	};
 }
 
 function applyFieldUpdates(cwd, snapshot, itemId, payload) {
@@ -243,25 +321,23 @@ function updateSingleSelectField(cwd, projectId, itemId, fieldId, optionId) {
 }
 
 function resolveGitCwd(cwd, config) {
-	// Already in a git repo?
 	if (tryRun(cwd, "git", ["rev-parse", "--show-toplevel"])) return cwd;
-	// Try explicit repoPath first
 	if (config.repoPath) {
 		const candidate = path.resolve(cwd, config.repoPath);
 		if (fs.existsSync(path.join(candidate, ".git"))) return candidate;
 	}
-	// Try config.repo as subdirectory name
 	if (config.repo) {
 		const candidate = path.join(cwd, config.repo);
 		if (fs.existsSync(path.join(candidate, ".git"))) return candidate;
 	}
-	// Scan immediate subdirs as last resort
 	try {
 		for (const entry of fs.readdirSync(cwd, { withFileTypes: true })) {
 			if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
 			if (fs.existsSync(path.join(cwd, entry.name, ".git"))) return path.join(cwd, entry.name);
 		}
-	} catch { /* ignore */ }
+	} catch {
+		// Ignore and fall back to cwd.
+	}
 	return cwd;
 }
 
@@ -275,24 +351,34 @@ function getGitState(cwd) {
 	const defaultBranch =
 		parseRemoteHead(tryRun(gitCwd, "git", ["symbolic-ref", "refs/remotes/origin/HEAD"])) ??
 		tryRun(gitCwd, "gh", ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]);
+	const remoteDefaultRef = defaultBranch ? `origin/${defaultBranch}` : undefined;
+	const headMergedToDefault = Boolean(headSha && remoteDefaultRef && isSuccess(gitCwd, "git", ["merge-base", "--is-ancestor", headSha, remoteDefaultRef]));
 	const repoInfo = inferRepoName(gitCwd, root);
 	const repo = config.repo ?? repoInfo.name;
 	const repoFullName = repoInfo.fullName;
 	const prUrl = branch
 		? tryRun(gitCwd, "gh", [
-				"pr",
-				"list",
-				"--state",
-				"open",
-				"--head",
-				branch,
-				"--json",
-				"url",
-				"--jq",
-				".[0].url",
-		  ])
+			"pr",
+			"list",
+			"--state",
+			"open",
+			"--head",
+			branch,
+			"--json",
+			"url",
+			"--jq",
+			".[0].url",
+		])
 		: undefined;
-	return { repo, repoFullName: repoFullName ?? undefined, branch, defaultBranch: defaultBranch ?? undefined, headSha: headSha ?? undefined, prUrl: prUrl ?? undefined };
+	return {
+		repo,
+		repoFullName: repoFullName ?? undefined,
+		branch,
+		defaultBranch: defaultBranch ?? undefined,
+		headSha: headSha ?? undefined,
+		headMergedToDefault,
+		prUrl: prUrl ?? undefined,
+	};
 }
 
 function inferRepoName(cwd, root) {
@@ -306,6 +392,42 @@ function parseRemoteHead(value) {
 	if (!value) return undefined;
 	const parts = value.trim().split("/");
 	return parts[parts.length - 1];
+}
+
+function parseIssueUrl(issueUrl) {
+	const match = issueUrl.match(/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/);
+	if (!match) return undefined;
+	return {
+		repoFullName: match[1],
+		issueNumber: match[2],
+	};
+}
+
+function parseStatusLine(line) {
+	const status = line.slice(0, 2).trim() || "??";
+	const rawPath = line.slice(3).trim();
+	if (!rawPath) return undefined;
+	const pathValue = rawPath.includes(" -> ") ? rawPath.split(" -> ").at(-1) : rawPath;
+	if (!pathValue) return undefined;
+	return { status, path: pathValue };
+}
+
+function clipUtf8(value, maxBytes) {
+	if (maxBytes <= 0) return "";
+	return Buffer.from(value, "utf8").subarray(0, maxBytes).toString("utf8");
+}
+
+function parseBoolean(value) {
+	if (value === undefined) return undefined;
+	if (value === "true") return true;
+	if (value === "false") return false;
+	return undefined;
+}
+
+function parseNumber(value) {
+	if (value === undefined) return undefined;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function ghGraphql(cwd, query, variables) {
@@ -354,6 +476,15 @@ function ghRest(cwd, method, endpoint, body) {
 	}
 	const raw = execFileSync("gh", args, options);
 	return JSON.parse(raw);
+}
+
+function isSuccess(cwd, command, args) {
+	try {
+		execFileSync(command, args, { cwd, stdio: ["ignore", "ignore", "ignore"] });
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 function tryRun(cwd, command, args) {

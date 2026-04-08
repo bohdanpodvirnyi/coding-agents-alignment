@@ -10,8 +10,12 @@ export interface AlignmentConfig {
 	branchFieldName?: string;
 	prUrlFieldName?: string;
 	agentFieldName?: string;
+	visibility: "silent" | "status" | "verbose";
+	attachPlanningArtifacts: boolean;
+	artifactMaxFiles: number;
+	artifactInlineMaxBytes: number;
 	statuses: {
-		todo: string;
+		planning: string;
 		inProgress: string;
 		finished: string;
 	};
@@ -27,7 +31,11 @@ interface ConfigFileShape {
 	branchFieldName?: string;
 	prUrlFieldName?: string;
 	agentFieldName?: string;
-	statuses?: Partial<AlignmentConfig["statuses"]>;
+	visibility?: AlignmentConfig["visibility"];
+	attachPlanningArtifacts?: boolean;
+	artifactMaxFiles?: number;
+	artifactInlineMaxBytes?: number;
+	statuses?: Partial<AlignmentConfig["statuses"]> & { todo?: string };
 	finishCheckIntervalMs?: number;
 }
 
@@ -40,8 +48,12 @@ const DEFAULT_CONFIG: Omit<AlignmentConfig, "githubOwner" | "githubProjectNumber
 	branchFieldName: "Branch",
 	prUrlFieldName: "PR URL",
 	agentFieldName: "Agent",
+	visibility: "silent",
+	attachPlanningArtifacts: true,
+	artifactMaxFiles: 20,
+	artifactInlineMaxBytes: 32_768,
 	statuses: {
-		todo: "Todo",
+		planning: "Planning",
 		inProgress: "In Progress",
 		finished: "Done",
 	},
@@ -70,9 +82,29 @@ export function loadAlignmentConfig(startDir: string): { config: AlignmentConfig
 			process.env.CODING_AGENTS_ALIGNMENT_PR_URL_FIELD ?? fileConfig.prUrlFieldName ?? DEFAULT_CONFIG.prUrlFieldName,
 		agentFieldName:
 			process.env.CODING_AGENTS_ALIGNMENT_AGENT_FIELD ?? fileConfig.agentFieldName ?? DEFAULT_CONFIG.agentFieldName,
+		visibility:
+			(parseVisibility(process.env.CODING_AGENTS_ALIGNMENT_VISIBILITY) ??
+				parseVisibility(fileConfig.visibility) ??
+				DEFAULT_CONFIG.visibility),
+		attachPlanningArtifacts:
+			parseBoolean(process.env.CODING_AGENTS_ALIGNMENT_ATTACH_PLANNING_ARTIFACTS) ??
+			fileConfig.attachPlanningArtifacts ??
+			DEFAULT_CONFIG.attachPlanningArtifacts,
+		artifactMaxFiles:
+			parseNumber(process.env.CODING_AGENTS_ALIGNMENT_ARTIFACT_MAX_FILES) ??
+			fileConfig.artifactMaxFiles ??
+			DEFAULT_CONFIG.artifactMaxFiles,
+		artifactInlineMaxBytes:
+			parseNumber(process.env.CODING_AGENTS_ALIGNMENT_ARTIFACT_INLINE_MAX_BYTES) ??
+			fileConfig.artifactInlineMaxBytes ??
+			DEFAULT_CONFIG.artifactInlineMaxBytes,
 		statuses: {
-			todo:
-				process.env.CODING_AGENTS_ALIGNMENT_STATUS_TODO ?? fileConfig.statuses?.todo ?? DEFAULT_CONFIG.statuses.todo,
+			planning:
+				process.env.CODING_AGENTS_ALIGNMENT_STATUS_PLANNING ??
+				process.env.CODING_AGENTS_ALIGNMENT_STATUS_TODO ??
+				fileConfig.statuses?.planning ??
+				fileConfig.statuses?.todo ??
+				DEFAULT_CONFIG.statuses.planning,
 			inProgress:
 				process.env.CODING_AGENTS_ALIGNMENT_STATUS_IN_PROGRESS ??
 				fileConfig.statuses?.inProgress ??
@@ -93,11 +125,29 @@ export function loadAlignmentConfig(startDir: string): { config: AlignmentConfig
 export function statusLabelToKey(
 	config: AlignmentConfig,
 	label?: string | null,
-): "todo" | "inProgress" | "finished" | undefined {
+): "planning" | "inProgress" | "finished" | undefined {
 	if (!label) return undefined;
-	if (label === config.statuses.todo) return "todo";
+	if (label === config.statuses.planning) return "planning";
 	if (label === config.statuses.inProgress) return "inProgress";
 	if (label === config.statuses.finished) return "finished";
+	return undefined;
+}
+
+function parseBoolean(value: string | undefined): boolean | undefined {
+	if (value === undefined) return undefined;
+	if (value === "true") return true;
+	if (value === "false") return false;
+	return undefined;
+}
+
+function parseNumber(value: string | undefined): number | undefined {
+	if (value === undefined) return undefined;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseVisibility(value: string | undefined): AlignmentConfig["visibility"] | undefined {
+	if (value === "silent" || value === "status" || value === "verbose") return value;
 	return undefined;
 }
 

@@ -1,5 +1,5 @@
 {
-  "description": "Ambient GitHub Project alignment — auto-creates/links items on code changes, finishes on PR/merge",
+  "description": "Ambient GitHub Project alignment — creates items during planning, promotes on code changes, finishes on merge",
   "hooks": {
     "UserPromptSubmit": [
       {

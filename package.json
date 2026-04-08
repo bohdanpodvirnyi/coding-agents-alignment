@@ -1,6 +1,6 @@
 {
   "name": "coding-agents-alignment",
-  "version": "1.0.3",
+  "version": "0.1.0",
   "description": "Ambient GitHub Project alignment for coding agents (pi + Claude Code)",
   "type": "module",
   "keywords": [
@@ -16,7 +16,8 @@
     ]
   },
   "scripts": {
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs"
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",

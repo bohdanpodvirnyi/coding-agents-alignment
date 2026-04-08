@@ -23,7 +23,20 @@ export interface GitState {
 	branch: string;
 	defaultBranch?: string;
 	headSha?: string;
+	headMergedToDefault?: boolean;
 	prUrl?: string;
+}
+
+export interface PlanningArtifact {
+	path: string;
+	status: string;
+	content?: string;
+	contentTruncated?: boolean;
+}
+
+export interface PlanningArtifactsSnapshot {
+	root: string;
+	files: PlanningArtifact[];
 }
 
 type WorkerRequest = Record<string, unknown>;

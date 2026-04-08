@@ -8,8 +8,9 @@ Automatically aligns coding work with a GitHub Project — no prompts, no dialog
 
 1. You start a Claude Code session and give it a task
 2. The plugin captures the prompt via `UserPromptSubmit` hook
-3. On the first `Edit` or `Write`, it auto-creates a GitHub issue (with you as assignee) and adds it to the project as **In Progress** — or links an existing item by branch name
-4. When a PR is detected or work lands on the default branch → **Done**
+3. On the first substantive task prompt, it auto-creates a GitHub issue (with you as assignee) and adds it to the project as **Planning** — or links an existing item by branch name
+4. On the first `Edit` or `Write`, it promotes the item to **In Progress** and, when possible, comments changed Markdown planning artifacts onto the issue
+5. When work lands on the default branch → **Done**
 
 ## Install
 
@@ -35,15 +36,15 @@ Same config format as the pi package — see the [main README](../README.md) for
 
 - `gh` CLI authenticated (`gh auth login`)
 - Node.js ≥ 18
-- GitHub Project with a `Status` single-select field (`Todo` / `In Progress` / `Done`)
+- GitHub Project with a `Status` single-select field (`Planning` / `In Progress` / `Done`)
 
 ## Hooks
 
 | Hook | Trigger | Action |
 |------|---------|--------|
-| `UserPromptSubmit` | Every prompt | Capture prompt text, set `pending` |
-| `PostToolUse` (Edit/Write) | Code changes | Create/link issue, set In Progress |
-| `PostToolUse` (Bash) | Shell commands | Check for PR/merge → Done |
+| `UserPromptSubmit` | Substantive task prompts | Create/link issue, set `Planning`, or switch tasks |
+| `PostToolUse` (Edit/Write) | Code changes | Promote to `In Progress` |
+| `PostToolUse` (Bash) | Shell commands | Check for merge-to-default → Done |
 | `Stop` | Agent stops | Final finish check |
 
 ## Commands
@@ -62,7 +63,7 @@ Example:
 /align
 ```
 
-Use this when you want to start tracking manually before the first edit/write.
+Use this when you want to start tracking manually before the prompt hook creates the item automatically.
 
 ## State
 
@@ -73,4 +74,4 @@ Per-session state stored in `~/.cache/coding-agents-alignment/<session-id>.json`
 - Creates real GitHub issues (not drafts) with current user as assignee
 - Falls back to draft items if issue creation fails
 - Failures are non-fatal — coding is never blocked
-- Read-only sessions (no edits) don't create project items
+- Read-only planning or investigation sessions stay in `Planning`

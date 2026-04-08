@@ -11,6 +11,7 @@ const LEADING_PHRASES = [
 
 const MAX_RECENT_PROMPTS = 8;
 const SLASH_COMMAND_RE = /^\/\S+/;
+const TASK_SWITCH_RE = /^(now|next|switch(?:ing)?|move on|separately|different task|another task|new task)\b/i;
 const LIGHTWEIGHT_FOLLOW_UP_RE =
 	/^(yes|yeah|yep|yup|ok|okay|sure|also|and|plus|pls|please|thanks|thx|do it|go ahead|continue|ship it|push( it)?|commit( it)?|release( it)?|tag( it)?|new tag as well|update docs|docs)$/i;
 
@@ -44,6 +45,29 @@ export function inferPromptFromHistory(prompts: string[] | undefined): string | 
 	}
 
 	return cleaned.find((prompt) => !SLASH_COMMAND_RE.test(prompt));
+}
+
+export function isSubstantivePrompt(prompt: string): boolean {
+	const cleaned = normalizePrompt(prompt);
+	if (!cleaned || SLASH_COMMAND_RE.test(cleaned)) return false;
+	if (isLightweightFollowUp(cleaned)) return false;
+	return cleaned.length >= 12;
+}
+
+export function isLikelyTaskSwitch(prompt: string, currentTitle?: string): boolean {
+	const cleaned = normalizePrompt(prompt);
+	if (!isSubstantivePrompt(cleaned) || !currentTitle) return false;
+	if (TASK_SWITCH_RE.test(cleaned)) return true;
+	const score = similarityScore(generateSummary(cleaned), currentTitle);
+	return score < 0.12;
+}
+
+export function formatPlanningNotes(prompts: string[] | undefined): string[] {
+	const notes = (prompts ?? [])
+		.map(normalizePrompt)
+		.filter(Boolean)
+		.filter((prompt) => !SLASH_COMMAND_RE.test(prompt));
+	return [...new Set(notes)];
 }
 
 export function rankSimilarItems(summary: string, items: ProjectItemSummary[]): Array<ProjectItemSummary & { score: number }> {

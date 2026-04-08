@@ -1,15 +1,5 @@
 #!/usr/bin/env node
 
-/**
- * coding-agents-alignment — Claude Code hook handler.
- *
- * Entry points:
- *   node alignment.mjs prompt        — UserPromptSubmit
- *   node alignment.mjs post-tool     — PostToolUse (Edit/Write)
- *   node alignment.mjs check-finish  — PostToolUse (Bash) + Stop
- *   node alignment.mjs cmd <action>  — Slash-command handler
- */
-
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -19,44 +9,77 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKER_PATH = path.join(__dirname, "worker.mjs");
 const STATE_DIR = path.join(process.env.HOME ?? "/tmp", ".cache", "coding-agents-alignment");
 
-// ── Action handlers ─────────────────────────────────────────────────────
-
-async function handlePrompt(_input, sessionId, cwd) {
+async function handlePrompt(input, sessionId, cwd) {
 	const config = loadConfig(cwd);
 	if (!config) return;
 
 	const state = readState(sessionId);
-	const prompt = _input.user_prompt ?? "";
-	const recentPrompts = appendRecentPrompt(state.recentPrompts, prompt);
+	if (state.mode === "unlinked") return;
 
-	if (state.mode === "idle") {
-		writeState(sessionId, { ...state, mode: "pending", pendingPrompt: prompt, recentPrompts });
-	} else if (state.mode === "pending") {
-		writeState(sessionId, { ...state, pendingPrompt: prompt, recentPrompts });
-	} else {
-		writeState(sessionId, { ...state, recentPrompts });
+	const prompt = input.user_prompt ?? "";
+	if (!isSubstantivePrompt(prompt)) return;
+
+	if (state.mode === "idle" || state.mode === "pending") {
+		const recentPrompts = appendRecentPrompt(undefined, prompt);
+		writeState(sessionId, {
+			...state,
+			mode: "pending",
+			pendingPrompt: prompt,
+			recentPrompts,
+			planningArtifactsAttachedAt: undefined,
+		});
+		await createOrLinkItem(sessionId, cwd, config, {
+			promptSeed: prompt,
+			recentPrompts,
+			desiredStatus: "planning",
+			preserveExisting: false,
+		});
+		return;
 	}
+
+	if (state.mode === "aligned" && isLikelyTaskSwitch(prompt, state.itemTitle)) {
+		await createOrLinkItem(sessionId, cwd, config, {
+			promptSeed: prompt,
+			recentPrompts: appendRecentPrompt(undefined, prompt),
+			desiredStatus: "planning",
+			preserveExisting: true,
+		});
+		return;
+	}
+
+	writeState(sessionId, {
+		...state,
+		pendingPrompt: prompt,
+		recentPrompts: appendRecentPrompt(state.recentPrompts, prompt),
+	});
 }
 
 async function handlePostTool(_input, sessionId, cwd) {
 	const config = loadConfig(cwd);
 	if (!config) return;
 
-	const state = readState(sessionId);
+	let state = readState(sessionId);
 
 	if (state.mode === "pending") {
-		await createOrLinkItem(sessionId, cwd, config, state);
-	} else if (state.mode === "aligned" && state.statusKey === "todo") {
-		syncItem(sessionId, cwd, config, state, "inProgress");
+		const created = await createOrLinkItem(sessionId, cwd, config, {
+			promptSeed: getPromptSeed(state),
+			recentPrompts: state.recentPrompts ?? [getPromptSeed(state)],
+			desiredStatus: "planning",
+			preserveExisting: false,
+		});
+		if (!created) return;
+		state = readState(sessionId);
+	}
+
+	if (state.mode === "aligned" && state.statusKey === "planning") {
+		await syncItem(sessionId, cwd, config, state, "inProgress");
 	}
 }
 
 async function handleCheckFinish(_input, sessionId, cwd) {
 	const config = loadConfig(cwd);
 	if (!config) return;
-
-	const state = readState(sessionId);
-	checkForFinish(sessionId, cwd, config, state);
+	await checkForFinish(sessionId, cwd, config);
 }
 
 async function handleCommand(command, sessionId, cwd) {
@@ -65,8 +88,12 @@ async function handleCommand(command, sessionId, cwd) {
 	switch (command) {
 		case "status": {
 			if (state.mode === "aligned") {
-				const pr = state.prUrl ? ` ${state.prUrl}` : "";
-				console.log(`📋 ${state.itemTitle ?? state.itemId} [${state.statusKey}]${pr}`);
+				const parts = [`📋 ${state.itemTitle ?? state.itemId} [${state.statusKey}]`];
+				if (state.prUrl) parts.push(state.prUrl);
+				if (state.lastError) parts.push(`error: ${state.lastError}`);
+				console.log(parts.join(" "));
+			} else if (state.lastError) {
+				console.log(`alignment: ${state.mode} (last error: ${state.lastError})`);
 			} else {
 				console.log(`alignment: ${state.mode}`);
 			}
@@ -79,36 +106,36 @@ async function handleCommand(command, sessionId, cwd) {
 			}
 			const config = loadConfig(cwd);
 			if (!config) return;
-			syncItem(sessionId, cwd, config, state, "finished");
-			console.log("✓ marked as done");
+			await syncItem(sessionId, cwd, config, state, "finished");
+			console.log("marked as done");
 			break;
 		}
 		case "unlink": {
-			writeState(sessionId, { ...state, mode: "unlinked", pendingPrompt: undefined });
+			writeState(sessionId, { ...state, mode: "unlinked" });
 			console.log("alignment stopped");
 			break;
 		}
 		case "align": {
-			if (state.mode === "aligned") {
-				console.log(`already aligned: ${state.itemTitle}`);
-				break;
-			}
 			const config = loadConfig(cwd);
 			if (!config) {
 				console.log("alignment not configured");
 				break;
 			}
-			const pendingPrompt = getPromptSeed(state);
-			writeState(sessionId, { ...state, mode: "pending", pendingPrompt });
-			await createOrLinkItem(sessionId, cwd, config, { ...state, mode: "pending", pendingPrompt });
-			const nextState = readState(sessionId);
-			if (nextState.mode === "aligned") {
-				console.log(`alignment started: ${nextState.itemTitle}`);
-			} else if (nextState.mode === "pending") {
-				console.log("alignment pending");
-			} else {
-				console.log("alignment start failed");
-			}
+			const prompt = getPromptSeed(state);
+			writeState(sessionId, {
+				...state,
+				mode: "pending",
+				pendingPrompt: prompt,
+				recentPrompts: appendRecentPrompt(undefined, prompt),
+				planningArtifactsAttachedAt: undefined,
+			});
+			const created = await createOrLinkItem(sessionId, cwd, config, {
+				promptSeed: prompt,
+				recentPrompts: appendRecentPrompt(undefined, prompt),
+				desiredStatus: "planning",
+				preserveExisting: false,
+			});
+			console.log(created ? "alignment started" : "alignment pending");
 			break;
 		}
 		case "resync": {
@@ -129,12 +156,13 @@ async function handleCommand(command, sessionId, cwd) {
 					prUrl: gitState.prUrl,
 					agent: "claude-code",
 				});
-				console.log("✓ synced");
+				clearError(sessionId);
+				console.log("alignment synced");
 			} catch (error) {
 				if (!isMissingItemError(error) || !(await recoverMissingItem(sessionId, cwd, config, state, state.statusKey ?? "inProgress", gitState))) {
 					throw error;
 				}
-				console.log("✓ recovered and synced");
+				console.log("alignment recovered and synced");
 			}
 			break;
 		}
@@ -143,117 +171,122 @@ async function handleCommand(command, sessionId, cwd) {
 	}
 }
 
-// ── Core alignment logic ────────────────────────────────────────────────
+async function createOrLinkItem(sessionId, cwd, config, options) {
+	const previousState = readState(sessionId);
 
-async function createOrLinkItem(sessionId, cwd, config, state) {
-	let gitState, snapshot;
 	try {
-		[gitState, snapshot] = await Promise.all([
+		const [gitState, snapshot] = await Promise.all([
 			Promise.resolve(runWorker(cwd, { command: "gitState" })),
 			Promise.resolve(runWorker(cwd, { command: "projectSnapshot" })),
 		]);
-	} catch {
-		writeState(sessionId, { ...state, mode: "idle", pendingPrompt: undefined });
-		return;
-	}
 
-	// Branch-based match
-	const branchMatch = gitState.branch
-		? snapshot.items.find((item) => item.branch === gitState.branch)
-		: undefined;
+		const branchMatch = gitState.branch ? snapshot.items.find((item) => item.branch === gitState.branch) : undefined;
 
-	if (branchMatch) {
-		const rawKey = statusLabelToKey(config, branchMatch.status) ?? "inProgress";
-		const effectiveKey = rawKey === "todo" ? "inProgress" : rawKey;
-
-		writeState(sessionId, {
-			...state,
-			mode: "aligned",
-			itemId: branchMatch.id,
-			itemTitle: branchMatch.title,
-			contentId: branchMatch.contentId,
-			contentUrl: branchMatch.contentUrl,
-			statusKey: effectiveKey,
-			repo: gitState.repo,
-			repoFullName: gitState.repoFullName,
-			branch: gitState.branch,
-			baseHeadSha: gitState.headSha,
-			prUrl: gitState.prUrl ?? branchMatch.prUrl,
-			lastSyncAt: Date.now(),
-		});
-
-		if (rawKey === "todo") {
-			tryWorker(cwd, {
+		if (branchMatch) {
+			const effectiveStatus = statusLabelToKey(config, branchMatch.status) ?? options.desiredStatus;
+			runWorker(cwd, {
 				command: "updateItem",
 				itemId: branchMatch.id,
-				statusKey: "inProgress",
+				statusKey: effectiveStatus,
 				repo: gitState.repo,
 				branch: gitState.branch,
 				prUrl: gitState.prUrl ?? branchMatch.prUrl,
 				agent: "claude-code",
 			});
-		}
-	} else {
-		const promptSeed = getPromptSeed(state);
-		const title = generateSummary(promptSeed);
-		const body = buildDraftBody(promptSeed, gitState);
 
-		let created;
-		try {
-			created = runWorker(cwd, {
-				command: "createItem",
-				title,
-				body,
-				repoFullName: gitState.repoFullName,
-				statusKey: "inProgress",
+			writeState(sessionId, {
+				mode: "aligned",
+				pendingPrompt: options.promptSeed,
+				recentPrompts: options.recentPrompts,
+				itemId: branchMatch.id,
+				itemTitle: branchMatch.title,
+				contentId: branchMatch.contentId,
+				contentUrl: branchMatch.contentUrl,
+				statusKey: effectiveStatus,
 				repo: gitState.repo,
+				repoFullName: gitState.repoFullName,
 				branch: gitState.branch,
-				agent: "claude-code",
+				baseHeadSha: gitState.headSha,
+				prUrl: gitState.prUrl ?? branchMatch.prUrl,
+				planningArtifactsAttachedAt: effectiveStatus === "planning" ? undefined : Date.now(),
+				lastSyncAt: Date.now(),
+				lastFinishCheckAt: undefined,
+				lastError: undefined,
+				lastErrorAt: undefined,
+				retryCount: 0,
 			});
-		} catch {
-			writeState(sessionId, { ...state, mode: "idle", pendingPrompt: undefined });
-			return;
+			return true;
 		}
+
+		const title = generateSummary(options.promptSeed);
+		const created = runWorker(cwd, {
+			command: "createItem",
+			title,
+			body: buildIssueBody(options.recentPrompts, gitState),
+			repoFullName: gitState.repoFullName,
+			statusKey: options.desiredStatus,
+			repo: gitState.repo,
+			branch: gitState.branch,
+			agent: "claude-code",
+		});
 
 		writeState(sessionId, {
-			...state,
 			mode: "aligned",
+			pendingPrompt: options.promptSeed,
+			recentPrompts: options.recentPrompts,
 			itemId: created.itemId,
 			itemTitle: created.title,
 			contentId: created.contentId,
 			contentUrl: created.contentUrl,
-			statusKey: "inProgress",
+			statusKey: options.desiredStatus,
 			repo: gitState.repo,
 			repoFullName: gitState.repoFullName,
 			branch: gitState.branch,
 			baseHeadSha: gitState.headSha,
 			prUrl: gitState.prUrl,
+			planningArtifactsAttachedAt: options.desiredStatus === "planning" ? undefined : Date.now(),
 			lastSyncAt: Date.now(),
+			lastFinishCheckAt: undefined,
+			lastError: undefined,
+			lastErrorAt: undefined,
+			retryCount: 0,
 		});
+		return true;
+	} catch (error) {
+		if (options.preserveExisting && previousState.mode === "aligned") {
+			writeState(sessionId, {
+				...previousState,
+				lastError: messageOf(error),
+				lastErrorAt: Date.now(),
+				retryCount: (previousState.retryCount ?? 0) + 1,
+			});
+		} else {
+			writeState(sessionId, {
+				...previousState,
+				mode: "pending",
+				pendingPrompt: options.promptSeed,
+				recentPrompts: options.recentPrompts,
+				lastError: messageOf(error),
+				lastErrorAt: Date.now(),
+				retryCount: (previousState.retryCount ?? 0) + 1,
+			});
+		}
+		return false;
 	}
-}
-
-function isMissingItemError(error) {
-	const message = messageOf(error).toLowerCase();
-	return (
-		message.includes("projectv2item") ||
-		message.includes("could not resolve") ||
-		message.includes("not found") ||
-		message.includes("does not exist")
-	);
 }
 
 async function recoverMissingItem(sessionId, cwd, config, state, nextStatus, extra = {}) {
 	if (state.mode !== "aligned") return false;
 
-	const gitState = extra.branch || extra.repo || extra.prUrl
+	const gitState = extra.branch || extra.repo || extra.prUrl || extra.headSha
 		? {
 			repo: extra.repo ?? state.repo ?? "",
+			repoFullName: extra.repoFullName ?? state.repoFullName,
 			branch: extra.branch ?? state.branch ?? "",
+			defaultBranch: extra.defaultBranch,
+			headSha: extra.headSha ?? state.baseHeadSha,
+			headMergedToDefault: extra.headMergedToDefault,
 			prUrl: extra.prUrl ?? state.prUrl,
-			defaultBranch: undefined,
-			headSha: state.baseHeadSha,
-			repoFullName: undefined,
 		}
 		: runWorker(cwd, { command: "gitState" });
 	const snapshot = runWorker(cwd, { command: "projectSnapshot" });
@@ -271,16 +304,19 @@ async function recoverMissingItem(sessionId, cwd, config, state, nextStatus, ext
 		});
 		writeState(sessionId, {
 			...state,
-			mode: "aligned",
 			itemId: branchMatch.id,
 			itemTitle: branchMatch.title,
 			contentId: branchMatch.contentId,
 			contentUrl: branchMatch.contentUrl,
 			statusKey: nextStatus,
 			repo: gitState.repo ?? state.repo,
+			repoFullName: gitState.repoFullName ?? state.repoFullName,
 			branch: gitState.branch ?? state.branch,
 			prUrl: gitState.prUrl ?? state.prUrl,
 			lastSyncAt: Date.now(),
+			lastError: undefined,
+			lastErrorAt: undefined,
+			retryCount: 0,
 		});
 		return true;
 	}
@@ -298,26 +334,28 @@ async function recoverMissingItem(sessionId, cwd, config, state, nextStatus, ext
 			});
 			writeState(sessionId, {
 				...state,
-				mode: "aligned",
 				itemId: readded.itemId,
 				statusKey: nextStatus,
 				repo: gitState.repo ?? state.repo,
+				repoFullName: gitState.repoFullName ?? state.repoFullName,
 				branch: gitState.branch ?? state.branch,
 				prUrl: gitState.prUrl ?? state.prUrl,
 				lastSyncAt: Date.now(),
+				lastError: undefined,
+				lastErrorAt: undefined,
+				retryCount: 0,
 			});
 			return true;
 		} catch {
-			// fall through
+			// Fall through.
 		}
 	}
 
 	const promptSeed = getPromptSeed(state);
-	const title = state.itemTitle ?? generateSummary(promptSeed);
 	const created = runWorker(cwd, {
 		command: "createItem",
-		title,
-		body: buildDraftBody(state.pendingPrompt ?? promptSeed, gitState),
+		title: state.itemTitle ?? generateSummary(promptSeed),
+		body: buildIssueBody(state.recentPrompts ?? [promptSeed], gitState),
 		repoFullName: gitState.repoFullName,
 		statusKey: nextStatus,
 		repo: gitState.repo ?? state.repo,
@@ -326,55 +364,89 @@ async function recoverMissingItem(sessionId, cwd, config, state, nextStatus, ext
 	});
 	writeState(sessionId, {
 		...state,
-		mode: "aligned",
 		itemId: created.itemId,
 		itemTitle: created.title,
 		contentId: created.contentId,
 		contentUrl: created.contentUrl,
 		statusKey: nextStatus,
 		repo: gitState.repo ?? state.repo,
+		repoFullName: gitState.repoFullName ?? state.repoFullName,
 		branch: gitState.branch ?? state.branch,
 		prUrl: gitState.prUrl ?? state.prUrl,
 		lastSyncAt: Date.now(),
+		lastError: undefined,
+		lastErrorAt: undefined,
+		retryCount: 0,
 	});
 	return true;
 }
 
-function syncItem(sessionId, cwd, config, state, nextStatus, extra = {}) {
+async function syncItem(sessionId, cwd, config, state, nextStatus, extra = {}) {
 	if (state.mode !== "aligned" || !state.itemId) return;
 
-	const updated = {
+	const itemId = state.itemId;
+	const planningPrompts = [...(state.recentPrompts ?? [])];
+	const issueUrl = state.contentUrl;
+	const shouldAttachArtifacts =
+		nextStatus === "inProgress" &&
+		state.statusKey === "planning" &&
+		!state.planningArtifactsAttachedAt &&
+		Boolean(issueUrl) &&
+		config.attachPlanningArtifacts;
+
+	writeState(sessionId, {
 		...state,
 		statusKey: nextStatus,
-		branch: extra.branch ?? state.branch,
 		repo: extra.repo ?? state.repo,
+		repoFullName: extra.repoFullName ?? state.repoFullName,
+		branch: extra.branch ?? state.branch,
 		prUrl: extra.prUrl ?? state.prUrl,
 		lastSyncAt: Date.now(),
-	};
-	writeState(sessionId, updated);
+	});
 
 	try {
 		runWorker(cwd, {
 			command: "updateItem",
-			itemId: state.itemId,
+			itemId,
 			statusKey: nextStatus,
 			repo: extra.repo ?? state.repo,
 			branch: extra.branch ?? state.branch,
 			prUrl: extra.prUrl ?? state.prUrl,
 			agent: "claude-code",
 		});
+
+		if (shouldAttachArtifacts && issueUrl) {
+			await attachPlanningArtifacts(sessionId, cwd, itemId, issueUrl, planningPrompts);
+		}
+		clearError(sessionId);
 	} catch (error) {
-		if (!isMissingItemError(error)) return;
-		void recoverMissingItem(sessionId, cwd, config, updated, nextStatus, extra);
+		if (!isMissingItemError(error) || !(await recoverMissingItem(sessionId, cwd, config, readState(sessionId), nextStatus, extra))) {
+			recordError(sessionId, readState(sessionId), error);
+		}
 	}
 }
 
-function checkForFinish(sessionId, cwd, config, state) {
+async function attachPlanningArtifacts(sessionId, cwd, itemId, issueUrl, prompts) {
+	const artifacts = runWorker(cwd, { command: "planningArtifacts" });
+	if (!artifacts.files?.length) {
+		writeStateForItem(sessionId, itemId, { planningArtifactsAttachedAt: Date.now() });
+		return;
+	}
+
+	runWorker(cwd, {
+		command: "commentIssue",
+		issueUrl,
+		body: buildPlanningArtifactsComment(prompts, artifacts),
+	});
+	writeStateForItem(sessionId, itemId, { planningArtifactsAttachedAt: Date.now() });
+}
+
+async function checkForFinish(sessionId, cwd, config) {
+	const state = readState(sessionId);
 	if (state.mode !== "aligned" || state.statusKey === "finished" || !state.itemId) return;
 
 	const now = Date.now();
 	if (state.lastFinishCheckAt && now - state.lastFinishCheckAt < config.finishCheckIntervalMs) return;
-
 	writeState(sessionId, { ...state, lastFinishCheckAt: now });
 
 	let gitState;
@@ -384,18 +456,20 @@ function checkForFinish(sessionId, cwd, config, state) {
 		return;
 	}
 
-	const committedToDefault =
+	const directToDefault =
 		Boolean(gitState.defaultBranch) &&
 		gitState.branch === gitState.defaultBranch &&
 		Boolean(gitState.headSha) &&
 		gitState.headSha !== state.baseHeadSha;
+	const mergedFeatureBranch =
+		Boolean(gitState.headMergedToDefault) &&
+		Boolean(gitState.headSha) &&
+		gitState.branch !== gitState.defaultBranch &&
+		gitState.headSha !== state.baseHeadSha;
 
-	if (!gitState.prUrl && !committedToDefault) return;
-
-	syncItem(sessionId, cwd, config, state, "finished", gitState);
+	if (!directToDefault && !mergedFeatureBranch) return;
+	await syncItem(sessionId, cwd, config, readState(sessionId), "finished", gitState);
 }
-
-// ── State management ────────────────────────────────────────────────────
 
 function readState(sessionId) {
 	const filePath = statePath(sessionId);
@@ -414,49 +488,61 @@ function writeState(sessionId, state) {
 	fs.renameSync(tmp, filePath);
 }
 
+function writeStateForItem(sessionId, itemId, patch) {
+	const state = readState(sessionId);
+	if (state.itemId !== itemId) return;
+	writeState(sessionId, { ...state, ...patch });
+}
+
 function statePath(sessionId) {
 	return path.join(STATE_DIR, `${sessionId}.json`);
 }
-
-// ── Config ──────────────────────────────────────────────────────────────
 
 const CONFIG_FILE = ".coding-agents-alignment.json";
 
 const DEFAULTS = {
 	statusFieldName: "Status",
-	repoFieldName: "Repo",
-	branchFieldName: "Branch",
-	prUrlFieldName: "PR URL",
-	agentFieldName: "Agent",
-	statuses: { todo: "Todo", inProgress: "In Progress", finished: "Done" },
+	statuses: { planning: "Planning", inProgress: "In Progress", finished: "Done" },
+	attachPlanningArtifacts: true,
 	finishCheckIntervalMs: 60_000,
 };
 
 function loadConfig(startDir) {
 	const filePath = findConfigFile(startDir);
-	const fc = filePath ? JSON.parse(fs.readFileSync(filePath, "utf8")) : {};
+	const fileConfig = filePath ? JSON.parse(fs.readFileSync(filePath, "utf8")) : {};
 
-	const githubOwner = process.env.CODING_AGENTS_ALIGNMENT_GITHUB_OWNER ?? fc.githubOwner;
-	const githubProjectNumber = Number(process.env.CODING_AGENTS_ALIGNMENT_GITHUB_PROJECT_NUMBER ?? fc.githubProjectNumber);
+	const githubOwner = process.env.CODING_AGENTS_ALIGNMENT_GITHUB_OWNER ?? fileConfig.githubOwner;
+	const githubProjectNumber = Number(process.env.CODING_AGENTS_ALIGNMENT_GITHUB_PROJECT_NUMBER ?? fileConfig.githubProjectNumber);
 	if (!githubOwner || !Number.isFinite(githubProjectNumber) || githubProjectNumber <= 0) return null;
 
 	return {
 		githubOwner,
 		githubProjectNumber,
-		repo: process.env.CODING_AGENTS_ALIGNMENT_REPO ?? fc.repo,
-		statusFieldName: process.env.CODING_AGENTS_ALIGNMENT_STATUS_FIELD ?? fc.statusFieldName ?? DEFAULTS.statusFieldName,
+		repo: process.env.CODING_AGENTS_ALIGNMENT_REPO ?? fileConfig.repo,
+		statusFieldName: process.env.CODING_AGENTS_ALIGNMENT_STATUS_FIELD ?? fileConfig.statusFieldName ?? DEFAULTS.statusFieldName,
+		attachPlanningArtifacts:
+			parseBoolean(process.env.CODING_AGENTS_ALIGNMENT_ATTACH_PLANNING_ARTIFACTS) ??
+			fileConfig.attachPlanningArtifacts ??
+			DEFAULTS.attachPlanningArtifacts,
 		statuses: {
-			todo: process.env.CODING_AGENTS_ALIGNMENT_STATUS_TODO ?? fc.statuses?.todo ?? DEFAULTS.statuses.todo,
-			inProgress: process.env.CODING_AGENTS_ALIGNMENT_STATUS_IN_PROGRESS ?? fc.statuses?.inProgress ?? DEFAULTS.statuses.inProgress,
-			finished: process.env.CODING_AGENTS_ALIGNMENT_STATUS_FINISHED ?? fc.statuses?.finished ?? DEFAULTS.statuses.finished,
+			planning:
+				process.env.CODING_AGENTS_ALIGNMENT_STATUS_PLANNING ??
+				process.env.CODING_AGENTS_ALIGNMENT_STATUS_TODO ??
+				fileConfig.statuses?.planning ??
+				fileConfig.statuses?.todo ??
+				DEFAULTS.statuses.planning,
+			inProgress:
+				process.env.CODING_AGENTS_ALIGNMENT_STATUS_IN_PROGRESS ?? fileConfig.statuses?.inProgress ?? DEFAULTS.statuses.inProgress,
+			finished:
+				process.env.CODING_AGENTS_ALIGNMENT_STATUS_FINISHED ?? fileConfig.statuses?.finished ?? DEFAULTS.statuses.finished,
 		},
-		finishCheckIntervalMs: typeof fc.finishCheckIntervalMs === "number" ? fc.finishCheckIntervalMs : DEFAULTS.finishCheckIntervalMs,
+		finishCheckIntervalMs: typeof fileConfig.finishCheckIntervalMs === "number" ? fileConfig.finishCheckIntervalMs : DEFAULTS.finishCheckIntervalMs,
 	};
 }
 
 function statusLabelToKey(config, label) {
 	if (!label) return undefined;
-	if (label === config.statuses.todo) return "todo";
+	if (label === config.statuses.planning) return "planning";
 	if (label === config.statuses.inProgress) return "inProgress";
 	if (label === config.statuses.finished) return "finished";
 	return undefined;
@@ -473,8 +559,6 @@ function findConfigFile(startDir) {
 	}
 }
 
-// ── Summary ─────────────────────────────────────────────────────────────
-
 const LEADING_PHRASES = [
 	/^please\s+/i,
 	/^can you\s+/i,
@@ -486,11 +570,12 @@ const LEADING_PHRASES = [
 
 const MAX_RECENT_PROMPTS = 8;
 const SLASH_COMMAND_RE = /^\/\S+/;
+const TASK_SWITCH_RE = /^(now|next|switch(?:ing)?|move on|separately|different task|another task|new task)\b/i;
 const LIGHTWEIGHT_FOLLOW_UP_RE =
 	/^(yes|yeah|yep|yup|ok|okay|sure|also|and|plus|pls|please|thanks|thx|do it|go ahead|continue|ship it|push( it)?|commit( it)?|release( it)?|tag( it)?|new tag as well|update docs|docs)$/i;
 
 function generateSummary(prompt) {
-	const singleLine = prompt.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();
+	const singleLine = normalizePrompt(prompt);
 	const firstSentence = singleLine.split(/[.!?]\s/)[0] ?? singleLine;
 	let summary = firstSentence;
 	for (const re of LEADING_PHRASES) summary = summary.replace(re, "");
@@ -519,8 +604,46 @@ function inferPromptFromHistory(prompts) {
 	return cleaned.find((prompt) => !SLASH_COMMAND_RE.test(prompt));
 }
 
-function getPromptSeed(state) {
-	return state.pendingPrompt?.trim() || inferPromptFromHistory(state.recentPrompts) || "Current session work";
+function formatPlanningNotes(prompts) {
+	return [...new Set((prompts ?? []).map(normalizePrompt).filter(Boolean).filter((prompt) => !SLASH_COMMAND_RE.test(prompt)))];
+}
+
+function isSubstantivePrompt(prompt) {
+	const cleaned = normalizePrompt(prompt);
+	if (!cleaned || SLASH_COMMAND_RE.test(cleaned)) return false;
+	if (isLightweightFollowUp(cleaned)) return false;
+	return cleaned.length >= 12;
+}
+
+function isLikelyTaskSwitch(prompt, currentTitle) {
+	const cleaned = normalizePrompt(prompt);
+	if (!isSubstantivePrompt(cleaned) || !currentTitle) return false;
+	if (TASK_SWITCH_RE.test(cleaned)) return true;
+	return similarityScore(generateSummary(cleaned), currentTitle) < 0.12;
+}
+
+function similarityScore(left, right) {
+	const leftTokens = tokenize(left);
+	const rightTokens = tokenize(right);
+	if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
+	let overlap = 0;
+	for (const token of leftTokens) if (rightTokens.has(token)) overlap += 1;
+	const union = new Set([...leftTokens, ...rightTokens]).size;
+	const jaccard = overlap / union;
+	const leftLower = left.toLowerCase();
+	const rightLower = right.toLowerCase();
+	const substringBonus = leftLower.includes(rightLower) || rightLower.includes(leftLower) ? 0.2 : 0;
+	return Math.min(1, jaccard + substringBonus);
+}
+
+function tokenize(value) {
+	return new Set(
+		value
+			.toLowerCase()
+			.replace(/[^a-z0-9\s-]/g, " ")
+			.split(/\s+/)
+			.filter((token) => token.length >= 3),
+	);
 }
 
 function normalizePrompt(prompt) {
@@ -531,7 +654,68 @@ function isLightweightFollowUp(prompt) {
 	return prompt.length <= 24 || LIGHTWEIGHT_FOLLOW_UP_RE.test(prompt);
 }
 
-// ── Worker ──────────────────────────────────────────────────────────────
+function getPromptSeed(state) {
+	return state.pendingPrompt?.trim() || inferPromptFromHistory(state.recentPrompts) || "Current session work";
+}
+
+function buildIssueBody(prompts, gitState) {
+	const notes = formatPlanningNotes(prompts);
+	const goal = notes[0] ?? "Current session work";
+	return [
+		"## Goal",
+		goal,
+		"",
+		"## Constraints",
+		"None captured yet.",
+		"",
+		"## Planning Notes",
+		...(notes.length > 0 ? notes.map((note) => `- ${note}`) : ["- None captured yet."]),
+		"",
+		"## Context",
+		`- Repo: ${gitState.repo || "unknown"}`,
+		`- Branch: ${gitState.branch || "unknown"}`,
+		"- Agent: claude-code",
+	].join("\n");
+}
+
+function buildPlanningArtifactsComment(prompts, artifacts) {
+	const notes = formatPlanningNotes(prompts);
+	const lines = [
+		"## Planning Notes",
+		...(notes.length > 0 ? notes.map((note) => `- ${note}`) : ["- None captured."]),
+		"",
+		"## Planning Artifacts",
+	];
+
+	if (!artifacts.files?.length) {
+		lines.push("- No changed Markdown artifacts were present at promotion time.");
+		return lines.join("\n");
+	}
+
+	for (const artifact of artifacts.files) {
+		lines.push(`- \`${artifact.path}\` [${artifact.status}]`);
+		if (artifact.content) {
+			lines.push("");
+			lines.push(`<details><summary>${artifact.path}</summary>`);
+			lines.push("");
+			lines.push("```md");
+			lines.push(artifact.content);
+			if (artifact.contentTruncated) lines.push("\n<!-- truncated -->");
+			lines.push("```");
+			lines.push("</details>");
+			lines.push("");
+		}
+	}
+
+	return lines.join("\n");
+}
+
+function parseBoolean(value) {
+	if (value === undefined) return undefined;
+	if (value === "true") return true;
+	if (value === "false") return false;
+	return undefined;
+}
 
 function runWorker(cwd, payload) {
 	try {
@@ -549,40 +733,41 @@ function runWorker(cwd, payload) {
 		const stdout = error && typeof error === "object" && "stdout" in error ? String(error.stdout || "") : "";
 		const stderr = error && typeof error === "object" && "stderr" in error ? String(error.stderr || "") : "";
 		if (stdout.trim()) {
-			let parsed;
-			try {
-				parsed = JSON.parse(stdout);
-			} catch (parseError) {
-				throw new Error(`Failed to parse worker output: ${String(parseError)}\n${stdout || stderr}`);
-			}
+			const parsed = JSON.parse(stdout);
 			if (!parsed.ok) throw new Error(parsed.error);
 			return parsed.result;
 		}
-		throw error;
+		throw new Error(stderr.trim() || messageOf(error));
 	}
 }
 
-function tryWorker(cwd, payload) {
-	try {
-		return runWorker(cwd, payload);
-	} catch {
-		return undefined;
-	}
+function isMissingItemError(error) {
+	const message = messageOf(error).toLowerCase();
+	return (
+		message.includes("projectv2item") ||
+		message.includes("could not resolve") ||
+		message.includes("not found") ||
+		message.includes("does not exist")
+	);
 }
 
-// ── Utilities ───────────────────────────────────────────────────────────
+function recordError(sessionId, state, error) {
+	writeState(sessionId, {
+		...state,
+		lastError: messageOf(error),
+		lastErrorAt: Date.now(),
+		retryCount: (state.retryCount ?? 0) + 1,
+	});
+}
 
-function buildDraftBody(prompt, gitState) {
-	const excerpt = prompt.replace(/\s+/g, " ").trim().slice(0, 500);
-	return [
-		"Created by coding-agents-alignment",
-		`Created at: ${new Date().toISOString()}`,
-		`Repo: ${gitState.repo}`,
-		`Branch: ${gitState.branch}`,
-		"",
-		"Prompt excerpt:",
-		excerpt,
-	].join("\n");
+function clearError(sessionId) {
+	const state = readState(sessionId);
+	writeState(sessionId, {
+		...state,
+		lastError: undefined,
+		lastErrorAt: undefined,
+		retryCount: 0,
+	});
 }
 
 function messageOf(error) {
@@ -599,8 +784,6 @@ function readStdin() {
 		process.stdin.on("error", reject);
 	});
 }
-
-// ── Main ────────────────────────────────────────────────────────────────
 
 const action = process.argv[2];
 

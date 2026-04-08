@@ -8,8 +8,9 @@ Works with **[pi](https://github.com/badlogic/pi-mono)** and **Claude Code**.
 
 1. Agent session starts, user gives a task
 2. The extension captures the prompt silently
-3. On the first `edit` or `write`, it auto-creates a GitHub issue (with the current user as assignee) and adds it to the project as **In Progress** — or links an existing item by branch name
-4. When a PR is detected or work lands on the default branch → **Done**
+3. On the first substantive task prompt, it auto-creates a GitHub issue (with the current user as assignee) and adds it to the project as **Planning** — or links an existing item by branch name
+4. On the first code-changing action, it moves the item to **In Progress** and, when possible, comments changed Markdown planning artifacts onto the issue
+5. When work lands on the default branch → **Done**
 
 No prompts. No dialogs. No interruptions.
 
@@ -54,9 +55,13 @@ Create `.coding-agents-alignment.json` in your repo root:
 | `branchFieldName` | `"Branch"` | Name of the branch text field |
 | `prUrlFieldName` | `"PR URL"` | Name of the PR URL text field |
 | `agentFieldName` | `"Agent"` | Name of the agent text field |
-| `statuses.todo` | `"Todo"` | Label for the todo status |
+| `statuses.planning` | `"Planning"` | Label for the planning status |
 | `statuses.inProgress` | `"In Progress"` | Label for the in-progress status |
 | `statuses.finished` | `"Done"` | Label for the finished status |
+| `visibility` | `"silent"` | Ambient output level: `silent`, `status`, or `verbose` |
+| `attachPlanningArtifacts` | `true` | Comment changed Markdown planning artifacts when promoting to `In Progress` |
+| `artifactMaxFiles` | `20` | Maximum Markdown artifact files to include |
+| `artifactInlineMaxBytes` | `32768` | Max total inlined artifact bytes in the planning comment |
 | `finishCheckIntervalMs` | `60000` | Throttle for finish detection checks |
 
 Every key can be overridden with env vars: `CODING_AGENTS_ALIGNMENT_GITHUB_OWNER`, `CODING_AGENTS_ALIGNMENT_GITHUB_PROJECT_NUMBER`, `CODING_AGENTS_ALIGNMENT_REPO`, `CODING_AGENTS_ALIGNMENT_REPO_PATH`, etc.
@@ -67,7 +72,7 @@ Your project needs these fields:
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `Status` | Single select | `Todo` → `In Progress` → `Done` |
+| `Status` | Single select | `Planning` → `In Progress` → `Done` |
 | `Repo` | Text | Which repo the work is in |
 | `Branch` | Text | Git branch name |
 | `PR URL` | Text | Pull request URL |
@@ -119,7 +124,7 @@ Example:
 /align
 ```
 
-Useful when you want to create/link the project item right away instead of waiting for the first edit/write.
+Useful when you want to create/link the project item right away instead of waiting for the first substantive prompt hook to do it automatically.
 
 ## Requirements
 

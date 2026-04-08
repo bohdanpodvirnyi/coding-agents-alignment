@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 
-export type StatusKey = "todo" | "inProgress" | "finished";
+export type StatusKey = "planning" | "inProgress" | "finished";
 export type AlignmentMode = "idle" | "pending" | "aligned" | "unlinked";
 
 export interface AlignmentState {
@@ -13,11 +13,16 @@ export interface AlignmentState {
 	contentUrl?: string;
 	statusKey?: StatusKey;
 	repo?: string;
+	repoFullName?: string;
 	branch?: string;
 	baseHeadSha?: string;
 	prUrl?: string;
+	planningArtifactsAttachedAt?: number;
 	lastSyncAt?: number;
 	lastFinishCheckAt?: number;
+	lastError?: string;
+	lastErrorAt?: number;
+	retryCount?: number;
 }
 
 const CUSTOM_TYPE = "coding-agents-alignment-state";
